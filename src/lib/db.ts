@@ -48,6 +48,12 @@ export interface Sale {
   id?: number;
   ts: number;
   customerId?: number;
+  /** denormalized customer snapshot so receipts/reports survive customer edits */
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  /** human-friendly receipt number, e.g. R-0042 */
+  receiptNo?: string;
   items: SaleItem[];
   subtotal: number;
   discount: number;

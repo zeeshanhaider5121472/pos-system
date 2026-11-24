@@ -1,4 +1,5 @@
 "use client";
+import { useReceiptPrinter } from "@/components/PrintReceipt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -10,11 +11,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { db, type Customer } from "@/lib/db";
+import { db, type Customer, type Sale } from "@/lib/db";
 import { money } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import { getLicense } from "@/lib/license";
 import { useLiveQuery } from "dexie-react-hooks";
-import { UserPlus } from "lucide-react";
+import { Printer, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -22,14 +24,47 @@ export default function Customers() {
   const { t } = useT();
   const [form, setForm] = useState<any>(null);
   const [hist, setHist] = useState<Customer | null>(null);
+
+  const lic = useLiveQuery(() => getLicense(), undefined);
+  const branding = lic?.branding ?? {};
+  const cur = String(branding.currency ?? "Rs");
+  const { print, holder } = useReceiptPrinter(branding);
+
   const list = useLiveQuery(() => db.customers.orderBy("name").toArray(), []);
-  const histSales = useLiveQuery(
-    () =>
-      hist
-        ? db.sales.where("customerId").equals(hist.id!).reverse().sortBy("ts")
-        : [],
-    [hist],
-  );
+
+  // per-customer bills + spend (matches by customerId OR phone snapshot)
+  const stats = useLiveQuery(async () => {
+    const sales = await db.sales.toArray();
+    const m = new Map<number, { bills: number; spent: number }>();
+    for (const s of sales) {
+      if (s.status !== "paid") continue;
+      const ids = new Set<number>();
+      if (s.customerId) ids.add(s.customerId);
+      if (s.customerPhone) {
+        for (const c of (list ?? []).filter((c) => c.phone === s.customerPhone))
+          ids.add(c.id!);
+      }
+      for (const id of ids) {
+        const r = m.get(id) ?? { bills: 0, spent: 0 };
+        r.bills++;
+        r.spent += s.total;
+        m.set(id, r);
+      }
+    }
+    return m;
+  }, [list]);
+
+  const histSales = useLiveQuery(async () => {
+    if (!hist) return [];
+    const all = await db.sales.toArray();
+    return all
+      .filter(
+        (s) =>
+          s.customerId === hist.id ||
+          (s.customerPhone && s.customerPhone === hist.phone),
+      )
+      .sort((a, b) => b.ts - a.ts) as Sale[];
+  }, [hist]);
 
   async function save() {
     const f = form;
@@ -66,40 +101,47 @@ export default function Customers() {
           {t("add")}
         </Button>
       </div>
-      {(list ?? []).map((c) => (
-        <Card key={c.id}>
-          <CardContent className="flex items-center gap-2 p-3 text-sm">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">{c.name}</p>
-              <p className="num text-xs text-muted-foreground">{c.phone}</p>
-            </div>
-            <span
-              className={`num font-semibold ${c.balance > 0 ? "text-red-600" : "text-muted-foreground"}`}
-            >
-              {money(c.balance)}
-            </span>
-            {c.balance > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => adjust(c, -c.balance)}
+      {(list ?? []).map((c) => {
+        const st = stats?.get(c.id!);
+        return (
+          <Card key={c.id}>
+            <CardContent className="flex items-center gap-2 p-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">{c.name}</p>
+                <p className="num text-xs text-muted-foreground">{c.phone}</p>
+                <p className="num mt-0.5 text-xs text-muted-foreground">
+                  {st?.bills ?? 0} {t("salesLabel")} · {t("totalSpent")}{" "}
+                  {money(st?.spent ?? 0, cur)}
+                </p>
+              </div>
+              <span
+                className={`num font-semibold ${c.balance > 0 ? "text-red-600" : "text-muted-foreground"}`}
               >
-                Clear
+                {money(c.balance, cur)}
+              </span>
+              {c.balance > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => adjust(c, -c.balance)}
+                >
+                  Clear
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setHist(c)}>
+                {t("history")}
               </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => setHist(c)}>
-              {t("history")}
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => setForm({ ...c })}
-            >
-              …
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setForm({ ...c })}
+              >
+                …
+              </Button>
+            </CardContent>
+          </Card>
+        );
+      })}
       <Dialog open={!!form} onOpenChange={(o) => !o && setForm(null)}>
         <DialogContent>
           <DialogHeader>
@@ -150,11 +192,31 @@ export default function Customers() {
           </DialogHeader>
           <div className="max-h-[50vh] divide-y overflow-y-auto">
             {(histSales ?? []).map((s) => (
-              <div key={s.id} className="flex justify-between py-2 text-sm">
-                <span className="text-muted-foreground">
-                  {new Date(s.ts).toLocaleString("en-GB")}
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-2 py-2 text-sm"
+              >
+                <span className="min-w-0">
+                  <span className="num block text-muted-foreground">
+                    #{s.receiptNo ?? s.id} ·{" "}
+                    {new Date(s.ts).toLocaleString("en-GB")}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {s.status}
+                  </span>
                 </span>
-                <span className="num font-medium">{money(s.total)}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="num font-medium">{money(s.total, cur)}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    title={t("print")}
+                    onClick={() => print(s)}
+                  >
+                    <Printer className="size-3.5" />
+                  </Button>
+                </span>
               </div>
             ))}
             {(histSales ?? []).length === 0 && (
@@ -165,6 +227,7 @@ export default function Customers() {
           </div>
         </DialogContent>
       </Dialog>
+      {holder}
     </div>
   );
 }

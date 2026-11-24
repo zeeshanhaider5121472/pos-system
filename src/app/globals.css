@@ -11,12 +11,18 @@ html[dir="rtl"] {
 .num {
   font-variant-numeric: tabular-nums;
 }
+
 .receipt-holder {
   position: fixed;
   left: -10000px;
   top: 0;
+  width: 210mm;
 }
 @media print {
+  @page {
+    size: A4;
+    margin: 14mm 16mm;
+  }
   body * {
     visibility: hidden;
   }
@@ -24,18 +30,19 @@ html[dir="rtl"] {
   #receipt-print * {
     visibility: visible;
   }
-  #receipt-print {
-    position: fixed;
-    inset: 0;
-    width: 72mm;
-    background: #fff;
-  }
   .receipt-holder {
     position: static;
+    left: auto;
+    width: auto;
   }
-  @page {
-    size: 80mm auto;
-    margin: 4mm;
+  #receipt-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: #fff;
+    color: #000;
+    font-size: 13px;
   }
 }
 

@@ -1,4 +1,5 @@
 "use client";
+import { useReceiptPrinter } from "@/components/PrintReceipt";
 import { Receipt } from "@/components/Receipt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -18,7 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { db, getSetting, type Payment, type Sale } from "@/lib/db";
+import {
+  db,
+  getSetting,
+  type Customer,
+  type Payment,
+  type Sale,
+} from "@/lib/db";
 import { money } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import { canSell, evaluateLicense, getLicense } from "@/lib/license";
@@ -29,11 +37,12 @@ import {
   Pause,
   Plus,
   Printer,
+  ReceiptText,
   Search,
   Trash2,
+  UserRound,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useReactToPrint } from "react-to-print";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 type Line = {
@@ -62,14 +71,14 @@ export default function POS() {
   const [cart, setCart] = useState<Line[]>([]);
   const [method, setMethod] = useState<Payment["method"]>("cash");
   const [amountPaid, setAmountPaid] = useState("");
-  const [phone, setPhone] = useState("");
+  const [cust, setCust] = useState({ name: "", phone: "", address: "" });
+  const [billDisc, setBillDisc] = useState("");
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [sellable, setSellable] = useState(true);
-  const receiptRef = useRef<HTMLDivElement>(null);
-  const print = useReactToPrint({ contentRef: receiptRef });
 
   const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = (lic as any)?.d?.branding ?? {};
+  const branding = lic?.branding ?? {};
+  const { print, holder } = useReceiptPrinter(branding);
   const taxRate = Number(branding.taxRate) || 0;
   const cur = String(branding.currency ?? "Rs");
 
@@ -87,6 +96,21 @@ export default function POS() {
       category: m.get(v.productId)?.category ?? "",
     }));
   }, []);
+  const customers = useLiveQuery(() => db.customers.toArray(), []);
+
+  // existing-customer suggestions while typing a phone or name
+  const suggests = useMemo(() => {
+    const ph = cust.phone.trim();
+    const nm = cust.name.trim().toLowerCase();
+    if (!ph && !nm) return [];
+    return (customers ?? [])
+      .filter(
+        (c) =>
+          (ph && c.phone.startsWith(ph)) ||
+          (nm && c.name.toLowerCase().includes(nm)),
+      )
+      .slice(0, 5);
+  }, [customers, cust.phone, cust.name]);
 
   const shown = useMemo(
     () =>
@@ -99,15 +123,33 @@ export default function POS() {
   );
   const totals = useMemo(() => {
     const subtotal = cart.reduce((a, l) => a + l.unitPrice * l.qty, 0);
-    const discount = cart.reduce((a, l) => a + l.discount, 0);
+    const discount = Math.max(
+      0,
+      Math.min(Math.round(Number(billDisc) || 0), subtotal),
+    );
+    // spread the bill discount over the lines (proportional to line value,
+    // largest line absorbs the rounding remainder) so per-product reports
+    // and the receipt stay consistent with the bill total
+    const lineVals = cart.map((l) => l.unitPrice * l.qty);
+    const lineSum = lineVals.reduce((a, b) => a + b, 0);
+    const dist = lineVals.map((v) =>
+      lineSum > 0 ? Math.floor((v / lineSum) * discount) : 0,
+    );
+    if (cart.length > 0) {
+      let big = 0;
+      for (let i = 1; i < cart.length; i++)
+        if (lineVals[i] > lineVals[big]) big = i;
+      dist[big] += discount - dist.reduce((a, b) => a + b, 0);
+    }
     const tax = Math.round((subtotal - discount) * taxRate) / 100;
     return {
       subtotal,
       discount,
       tax,
       total: Math.round(subtotal - discount + tax),
+      dist,
     };
-  }, [cart, taxRate]);
+  }, [cart, billDisc, taxRate]);
 
   function add(v: any) {
     const inCart = cart.find((l) => l.variantId === v.id)?.qty ?? 0;
@@ -143,6 +185,50 @@ export default function POS() {
         .filter((l) => l.qty > 0),
     );
 
+  /** find-or-create the customer from the name/phone/address fields */
+  async function upsertCustomer(): Promise<{
+    customerId?: number;
+    name?: string;
+    phone?: string;
+    address?: string;
+  }> {
+    const name = cust.name.trim();
+    const phone = cust.phone.trim();
+    const address = cust.address.trim();
+    if (!name && !phone) return {};
+    try {
+      let ex: Customer | undefined;
+      if (phone) ex = await db.customers.where("phone").equals(phone).first();
+      else
+        ex = await db.customers
+          .filter((c) => c.name.toLowerCase() === name.toLowerCase())
+          .first();
+      if (ex) {
+        await db.customers.update(ex.id!, {
+          name: name || ex.name,
+          address: address || ex.address,
+        });
+        return {
+          customerId: ex.id,
+          name: name || ex.name,
+          phone: phone || ex.phone,
+          address: address || ex.address,
+        };
+      }
+      const id = await db.customers.add({
+        phone,
+        name: name || phone,
+        address: address || undefined,
+        points: 0,
+        balance: 0,
+      });
+      return { customerId: id, name: name || phone, phone, address };
+    } catch {
+      // e.g. duplicate phone — save the sale anyway with the typed info
+      return { name, phone, address };
+    }
+  }
+
   async function makeSale(status: "paid" | "held"): Promise<Sale | null> {
     const r = await evaluateLicense();
     if (!canSell(r.state)) {
@@ -150,38 +236,36 @@ export default function POS() {
       return null;
     }
     if (cart.length === 0) return null;
-    let customerId: number | undefined;
-    if (phone.trim()) {
-      const ex = await db.customers.where("phone").equals(phone.trim()).first();
-      customerId =
-        ex?.id ??
-        (await db.customers.add({
-          phone: phone.trim(),
-          name: phone.trim(),
-          points: 0,
-          balance: 0,
-        }));
-    }
-    const receiptLang = ((await getSetting("receiptLang")) ?? "en") as
-      | "en"
-      | "ur"
-      | "both";
     const payAmount =
       method === "cash" ? Number(amountPaid || totals.total) : totals.total;
     if (status === "paid" && method === "cash" && payAmount < totals.total) {
       toast.error(t("insufficient"));
       return null;
     }
+    const c = await upsertCustomer();
+    const receiptLang = ((await getSetting("receiptLang")) ?? "en") as
+      | "en"
+      | "ur"
+      | "both";
     const sale: Sale = {
       ts: Date.now(),
-      customerId,
-      items: cart.map(({ ...i }) => ({ ...i })),
-      ...totals,
+      customerId: c.customerId,
+      customerName: c.name,
+      customerPhone: c.phone,
+      customerAddress: c.address,
+      items: cart.map(({ ...i }, idx) => ({
+        ...i,
+        discount: totals.dist[idx],
+      })),
+      subtotal: totals.subtotal,
+      discount: totals.discount,
+      tax: totals.tax,
+      total: totals.total,
       payments: status === "held" ? [] : [{ method, amount: payAmount }],
       status,
       receiptLang,
     };
-    const id = await db.transaction(
+    const { sid, receiptNo } = await db.transaction(
       "rw",
       db.sales,
       db.variants,
@@ -189,6 +273,8 @@ export default function POS() {
       db.customers,
       async () => {
         const sid = await db.sales.add(sale);
+        const receiptNo = `R-${String(sid).padStart(4, "0")}`;
+        await db.sales.update(sid, { receiptNo });
         if (status === "paid") {
           for (const l of cart) {
             const v = (await db.variants.get(l.variantId))!;
@@ -201,20 +287,21 @@ export default function POS() {
               ref: `S${sid}`,
             });
           }
-          if (method === "credit" && customerId) {
-            const c = (await db.customers.get(customerId))!;
-            await db.customers.update(customerId, {
-              balance: c.balance + totals.total,
+          if (method === "credit" && c.customerId) {
+            const cu = (await db.customers.get(c.customerId))!;
+            await db.customers.update(c.customerId, {
+              balance: cu.balance + totals.total,
             });
           }
         }
-        return sid;
+        return { sid, receiptNo };
       },
     );
-    const done = { ...sale, id };
+    const done = { ...sale, id: sid, receiptNo };
     setCart([]);
     setAmountPaid("");
-    setPhone("");
+    setBillDisc("");
+    setCust({ name: "", phone: "", address: "" });
     if (status === "paid") setLastSale(done);
     else toast.success(t("saved"));
     return done;
@@ -228,6 +315,12 @@ export default function POS() {
     const s = await db.sales.get(id);
     if (!s) return;
     setCart(s.items.map((i) => ({ ...i })));
+    setBillDisc(s.discount ? String(s.discount) : "");
+    setCust({
+      name: s.customerName ?? "",
+      phone: s.customerPhone ?? "",
+      address: s.customerAddress ?? "",
+    });
     await db.sales.delete(id);
   }
 
@@ -333,13 +426,74 @@ export default function POS() {
           ))}
         </div>
         <div className="space-y-2 border-t p-3 text-sm">
+          {/* customer (optional — saved on the sale and printed on receipts) */}
+          <div className="space-y-1.5 rounded-md border p-2">
+            <div className="flex items-center gap-1.5">
+              <UserRound className="size-3.5 text-muted-foreground" />
+              <p className="text-xs font-semibold">{t("customer")}</p>
+              <span className="text-[10px] text-muted-foreground">
+                ({t("optional")})
+              </span>
+            </div>
+            <Input
+              className="num h-8 text-xs"
+              placeholder={t("phone")}
+              value={cust.phone}
+              inputMode="tel"
+              onChange={(e) => setCust({ ...cust, phone: e.target.value })}
+            />
+            <Input
+              className="h-8 text-xs"
+              placeholder={t("name")}
+              value={cust.name}
+              onChange={(e) => setCust({ ...cust, name: e.target.value })}
+            />
+            <Input
+              className="h-8 text-xs"
+              placeholder={t("address")}
+              value={cust.address}
+              onChange={(e) => setCust({ ...cust, address: e.target.value })}
+            />
+            {suggests.length > 0 && (
+              <div className="space-y-1">
+                {suggests.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded border px-2 py-1 text-left text-xs hover:bg-accent"
+                    onClick={() =>
+                      setCust({
+                        name: c.name,
+                        phone: c.phone,
+                        address: c.address ?? "",
+                      })
+                    }
+                  >
+                    <span className="min-w-0 truncate font-medium">
+                      {c.name}
+                    </span>
+                    <span className="num shrink-0 text-muted-foreground">
+                      {c.phone}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-between text-muted-foreground">
             <span>{t("subtotal")}</span>
             <span className="num">{money(totals.subtotal, cur)}</span>
           </div>
+          {totals.discount > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>{t("discount")}</span>
+              <span className="num">-{money(totals.discount, cur)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-muted-foreground">
             <span>
-              {t("tax")} ({taxRate}%)
+              {String(branding.taxName ?? t("tax"))} ({taxRate}%)
             </span>
             <span className="num">{money(totals.tax, cur)}</span>
           </div>
@@ -348,6 +502,20 @@ export default function POS() {
             <span className="num text-emerald-600">
               {money(totals.total, cur)}
             </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              inputMode="numeric"
+              className="num h-8 flex-1"
+              placeholder={`${t("discount")} (Rs)`}
+              value={billDisc}
+              onChange={(e) => setBillDisc(e.target.value)}
+            />
+            {totals.discount > 0 && (
+              <span className="num shrink-0 text-xs font-medium text-emerald-600">
+                -{money(totals.discount, cur)}
+              </span>
+            )}
           </div>
           <div className="flex gap-2">
             <Select
@@ -375,12 +543,6 @@ export default function POS() {
               />
             )}
           </div>
-          <Input
-            placeholder={t("phone")}
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="num"
-          />
           <div className="flex gap-2">
             <Button className="flex-1" onClick={() => makeSale("paid")}>
               {t("checkout")}
@@ -418,9 +580,15 @@ export default function POS() {
                       key={h.id}
                       className="flex items-center justify-between py-2 text-sm"
                     >
-                      <span>
-                        #{h.id} · {new Date(h.ts).toLocaleString("en-GB")} ·{" "}
-                        <span className="num">{money(h.total, cur)}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate">
+                          #{h.receiptNo ?? h.id}
+                          {h.customerName ? ` · ${h.customerName}` : ""}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(h.ts).toLocaleString("en-GB")} ·{" "}
+                          <span className="num">{money(h.total, cur)}</span>
+                        </span>
                       </span>
                       <Button
                         size="sm"
@@ -440,24 +608,39 @@ export default function POS() {
               </DialogContent>
             </Dialog>
           </div>
+        </div>
+      </div>
+
+      {/* receipt popup right after payment — print or start the next sale */}
+      <Dialog open={!!lastSale} onOpenChange={(o) => !o && setLastSale(null)}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ReceiptText className="size-4 text-emerald-600" />
+              {t("receiptReady")}
+            </DialogTitle>
+          </DialogHeader>
           {lastSale && (
+            <div className="max-h-[52vh] overflow-y-auto rounded-lg border bg-white shadow-inner">
+              <Receipt sale={lastSale} branding={branding} />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLastSale(null)}>
+              {t("newSale")}
+            </Button>
             <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => print()}
+              disabled={!lastSale}
+              onClick={() => lastSale && print(lastSale)}
             >
               <Printer className="mr-1.5 size-4" />
               {t("print")}
             </Button>
-          )}
-        </div>
-      </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <div className="receipt-holder">
-        <div ref={receiptRef}>
-          {lastSale && <Receipt sale={lastSale} branding={branding} />}
-        </div>
-      </div>
+      {holder}
     </div>
   );
 }

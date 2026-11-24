@@ -66,6 +66,8 @@ export async function POST(req: NextRequest) {
       currency: clean(b.branding?.currency, 8) || "Rs",
       taxRate: Math.max(0, Math.min(50, Number(b.branding?.taxRate) || 0)),
       taxName: clean(b.branding?.taxName, 12) || "Tax",
+      // large limit: allows https URLs and embedded data:image/... logos
+      logoUrl: clean(b.branding?.logoUrl, 300_000),
     },
     updatedAt: Date.now(),
   };

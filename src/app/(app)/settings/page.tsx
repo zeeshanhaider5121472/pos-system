@@ -1,4 +1,5 @@
 "use client";
+import { AdminLoginForm, LockBar } from "@/components/AdminGate";
 import { Receipt } from "@/components/Receipt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,8 +14,18 @@ import { db, getSetting, LOCAL_TABLES, setSetting, type Sale } from "@/lib/db";
 import { download, ymd } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import { getLicense } from "@/lib/license";
+import { useShopLockConfigured, useShopUnlocked } from "@/lib/shop-auth";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Download, Printer, Upload } from "lucide-react";
+import {
+  Download,
+  LockKeyhole,
+  Minus,
+  Plus,
+  Printer,
+  RefreshCw,
+  ShieldAlert,
+  Upload,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -23,7 +34,7 @@ export default function Settings() {
   const fileRef = useRef<HTMLInputElement>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = (lic as any)?.d?.branding ?? {};
+  const branding = lic?.branding ?? {};
   const [rLang, setRLang] = useState<string>("en");
   useLiveQuery(
     async () => setRLang(((await getSetting("receiptLang")) ?? "en") as string),
@@ -34,6 +45,24 @@ export default function Settings() {
     async () => (await getSetting("lastBackupAt")) as number | undefined,
     [],
   );
+
+  // shop-owner admin lock
+  const lockConfigured = useShopLockConfigured();
+  const unlocked = useShopUnlocked();
+
+  // font size (applies to the whole app, persisted locally)
+  const [scale, setScale] = useState(100);
+  useLiveQuery(async () => {
+    const s = await getSetting("fontScale");
+    if (typeof s === "number") setScale(s);
+  }, []);
+  function applyScale(v: number) {
+    const c = Math.min(140, Math.max(80, Math.round(v)));
+    setScale(c);
+    setSetting("fontScale", c);
+    document.documentElement.style.fontSize = `${c}%`;
+    window.dispatchEvent(new CustomEvent("fontscale", { detail: c }));
+  }
 
   async function exportBackup() {
     const data: any = {};
@@ -66,6 +95,10 @@ export default function Settings() {
   }
   const testSale: Sale = {
     ts: Date.now(),
+    receiptNo: "R-TEST",
+    customerName: "Test Customer",
+    customerPhone: "0300 1234567",
+    customerAddress: "Main Bazar, Lahore",
     items: [
       {
         variantId: 0,
@@ -89,8 +122,35 @@ export default function Settings() {
   };
   const print = () => window.print(); // test receipt uses the same @media print rules
 
+  if (lockConfigured === null)
+    return (
+      <div className="grid min-h-[50vh] place-items-center">
+        <RefreshCw className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+
+  if (lockConfigured && !unlocked)
+    return (
+      <div className="grid min-h-[60vh] place-items-center">
+        <div className="w-full max-w-sm space-y-4 rounded-xl border bg-background p-6 shadow-sm">
+          <LockKeyhole className="mx-auto size-8 text-muted-foreground" />
+          <p className="text-center text-sm font-medium">
+            {t("settingsNeeded")}
+          </p>
+          <AdminLoginForm onSuccess={() => undefined} />
+        </div>
+      </div>
+    );
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
+      {lockConfigured === false && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 md:col-span-2">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          {t("lockNotConfigured")}
+        </div>
+      )}
+
       <Card>
         <CardContent className="space-y-3 p-4">
           <h2 className="text-sm font-semibold">{t("language")}</h2>
@@ -131,6 +191,46 @@ export default function Settings() {
       </Card>
 
       <Card>
+        <CardContent className="space-y-3 p-4">
+          <h2 className="text-sm font-semibold">{t("fontSize")}</h2>
+          <p className="text-xs text-muted-foreground">{t("fontSizeHint")}</p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={scale <= 80}
+              onClick={() => applyScale(scale - 10)}
+            >
+              <Minus className="size-4" />
+            </Button>
+            <span className="num w-14 text-center text-sm font-semibold">
+              {scale}%
+            </span>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={scale >= 140}
+              onClick={() => applyScale(scale + 10)}
+            >
+              <Plus className="size-4" />
+            </Button>
+            <Button
+              variant={scale === 100 ? "default" : "outline"}
+              onClick={() => applyScale(100)}
+            >
+              {t("normal")}
+            </Button>
+          </div>
+          <p
+            className="text-sm text-muted-foreground"
+            style={{ fontSize: `${scale}%` }}
+          >
+            {t("appName")} — 1234567890
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardContent className="space-y-2 p-4">
           <h2 className="text-sm font-semibold">{t("branding")}</h2>
           <p className="text-sm">{String(branding.shopName ?? "—")}</p>
@@ -149,8 +249,13 @@ export default function Settings() {
         <CardContent className="space-y-3 p-4">
           <h2 className="text-sm font-semibold">{t("licenseInfo")}</h2>
           <p className="num text-sm">
-            {t("expiry")}: {String((lic as any)?.d?.exp ?? "—")} · {t("plan")}:{" "}
-            {String((lic as any)?.d?.plan ?? "—")}
+            {t("shopId")}: {lic?.cid || "—"}
+          </p>
+          <p className="num text-sm">
+            {t("expiry")}: {lic?.exp || "—"} · {t("plan")}: {lic?.plan || "—"}
+          </p>
+          <p className="text-sm">
+            {t("status")}: {lic?.status || "—"}
           </p>
           <a
             href="/activation"
@@ -198,6 +303,8 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      <LockBar />
     </div>
   );
 }

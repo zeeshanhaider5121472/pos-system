@@ -36,6 +36,7 @@ const blank = {
     currency: "Rs",
     taxRate: 0,
     taxName: "Tax",
+    logoUrl: "",
   },
 };
 
@@ -348,6 +349,24 @@ export default function Admin() {
                         branding: {
                           ...form.branding,
                           footerUr: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>
+                    Logo URL (printed on receipts — https link or data:image/…)
+                  </Label>
+                  <Input
+                    placeholder="https://example.com/logo.png"
+                    value={form.branding.logoUrl ?? ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: {
+                          ...form.branding,
+                          logoUrl: e.target.value,
                         },
                       })
                     }
