@@ -499,8 +499,18 @@ export default function Products() {
       {shown.map((p) => {
         const vs = (variants ?? []).filter((v) => v.productId === p.id);
         const stock = vs.reduce((a, v) => a + v.stock, 0);
+        // any variant at/below its reorder level marks the whole product red
+        const lowCount = vs.filter((v) => v.stock <= v.reorderLevel).length;
+        const low = lowCount > 0;
         return (
-          <Card key={p.id}>
+          <Card
+            key={p.id}
+            className={
+              low
+                ? "bg-red-50/60 ring-red-300 dark:bg-red-950/20 dark:ring-red-900/70"
+                : ""
+            }
+          >
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
@@ -514,9 +524,18 @@ export default function Products() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {p.category} · {p.brand} · {t("stock")}:{" "}
-                    <span className="num">{stock}</span>
+                    <span
+                      className={`num ${low ? "font-semibold text-red-600" : ""}`}
+                    >
+                      {stock}
+                    </span>
                   </p>
                 </div>
+                {low && (
+                  <Badge variant="destructive" className="shrink-0">
+                    {t("lowStock")}
+                  </Badge>
+                )}
                 <Badge variant="secondary" className="num">
                   {vs.length} {t("variants")}
                 </Badge>
@@ -545,7 +564,9 @@ export default function Products() {
                       </span>
                       <Badge variant="outline">{v.size}</Badge>
                       <Badge variant="outline">{v.color}</Badge>
-                      <span className="num">
+                      <span
+                        className={`num ${v.stock <= v.reorderLevel ? "font-semibold text-red-600" : ""}`}
+                      >
                         {t("stock")}: {v.stock}
                       </span>
                       <span className="num flex-1">

@@ -13,13 +13,13 @@ import { useT } from "@/lib/i18n";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   AlertTriangle,
+  MessageCircle,
   PackageX,
+  PiggyBank,
   Printer,
-  Share2,
   ShoppingBag,
   TrendingUp,
   UserRound,
-  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -37,6 +37,19 @@ export default function Dashboard() {
       .toArray();
     const paid = sales.filter((s) => s.status === "paid");
     const revenue = paid.reduce((a, s) => a + s.total, 0);
+    // same formula as the Reports page so both numbers always match:
+    // item revenue - item discount - cost of the sold units
+    const profit = paid.reduce(
+      (a, s) =>
+        a +
+        s.items.reduce(
+          (b, i) =>
+            b +
+            (i.qty * i.unitPrice - (i.discount ?? 0) - i.qty * (i.cost ?? 0)),
+          0,
+        ),
+      0,
+    );
     const low = (await db.variants.toArray()).filter(
       (v) => v.stock <= v.reorderLevel,
     );
@@ -74,6 +87,7 @@ export default function Dashboard() {
     const lastBackup = (await getSetting("lastBackupAt")) as number | undefined;
     return {
       revenue,
+      profit,
       count: paid.length,
       low,
       recent,
@@ -89,15 +103,15 @@ export default function Dashboard() {
       cls: "text-emerald-600",
     },
     {
+      icon: PiggyBank,
+      label: t("profit"),
+      v: money(agg.profit, cur),
+      cls: "text-sky-600",
+    },
+    {
       icon: ShoppingBag,
       label: t("transactions"),
       v: String(agg.count),
-      cls: "",
-    },
-    {
-      icon: Wallet,
-      label: t("avgBasket"),
-      v: money(agg.count ? agg.revenue / agg.count : 0, cur),
       cls: "",
     },
     {
@@ -183,7 +197,7 @@ export default function Dashboard() {
                     title={t("whatsapp")}
                     onClick={() => shareReceiptOnWhatsApp(s, branding)}
                   >
-                    <Share2 className="size-4" /> {/* Swapped icon here */}
+                    <MessageCircle className="size-4" />
                   </Button>
                 )}
                 <Button

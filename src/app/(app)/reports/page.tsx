@@ -26,30 +26,37 @@ import {
 import { db } from "@/lib/db";
 import { download, money, ymd } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import { exportTablePdf } from "@/lib/pdf";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   BarChart3,
+  CircleDollarSign,
   Download,
+  FileDown,
   LineChart,
   MessageCircle,
   PieChart,
   Printer,
   RefreshCw,
+  TrendingUp,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-type RT = "All Product" | "All Sales" | "All Customers";
+type RT = "product" | "sales" | "customer";
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 
 export default function Reports() {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const rtl = lang === "ur";
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
-  const [rt, setRt] = useState<RT>("All Sales");
+  const [rt, setRt] = useState<RT>("sales");
   const [dailyType, setDailyType] = useState<"line" | "pie">("line");
   const [mixType, setMixType] = useState<"pie" | "bars">("pie");
+  // which metric the daily pie chart shows — revenue or profit
+  const [pieMetric, setPieMetric] = useState<"r" | "p">("r");
 
   // default range = last 30 days, computed on the client only (new Date()
   // must not run during the prerender pass with Cache Components)
@@ -191,10 +198,12 @@ export default function Reports() {
     const low = (await db.variants.toArray()).filter(
       (v) => v.stock <= v.reorderLevel,
     );
+    const productCount = await db.products.count();
     return {
       revenue,
       profit,
       count: sales.length,
+      products: productCount,
       avg: sales.length ? revenue / sales.length : 0,
       daily: days.map((d) => ({ d, ...(daily.get(d) ?? { r: 0, p: 0 }) })),
       rows: [...bySku.values()].sort((a, b) => b.revenue - a.revenue),
@@ -218,7 +227,7 @@ export default function Reports() {
   }
   function exportCurrent() {
     if (!range) return;
-    if (rt === "All Product")
+    if (rt === "product")
       csv(
         "sales-by-product",
         ["SKU", "Name", "Qty", "Revenue", "Profit"],
@@ -230,7 +239,7 @@ export default function Reports() {
           Math.round(r.profit),
         ]),
       );
-    else if (rt === "All Sales")
+    else if (rt === "sales")
       csv(
         "all-sales",
         ["Receipt", "Date", "Customer", "Phone", "Items", "Payment", "Total"],
@@ -258,6 +267,78 @@ export default function Reports() {
       );
   }
 
+  // same table as exportCurrent(), but as a downloaded A4 PDF
+  async function exportCurrentPdf() {
+    if (!range) return;
+    const shop = String(branding.shopName ?? "").trim();
+    const sub = `${shop ? shop + " · " : ""}${range.from} → ${range.to}`;
+    const common = { subtitle: sub, rtl };
+    try {
+      if (rt === "product")
+        await exportTablePdf({
+          ...common,
+          title: t("salesByProduct"),
+          filename: `sales-by-product-${range.from}-${range.to}.pdf`,
+          columns: [t("sku"), t("name"), t("qty"), t("revenue"), t("profit")],
+          rows: (data?.rows ?? []).map((r) => [
+            r.sku,
+            r.name,
+            r.qty,
+            money(r.revenue, cur),
+            money(r.profit, cur),
+          ]),
+        });
+      else if (rt === "sales")
+        await exportTablePdf({
+          ...common,
+          title: t("allSales"),
+          filename: `all-sales-${range.from}-${range.to}.pdf`,
+          columns: [
+            t("receiptNo"),
+            t("date"),
+            t("customer"),
+            t("phone"),
+            t("items"),
+            t("method"),
+            t("total"),
+          ],
+          rows: (data?.sales ?? []).map((s) => [
+            s.receiptNo ?? `#${s.id}`,
+            new Date(s.ts).toLocaleString("en-GB"),
+            s.customerName ?? t("walkIn"),
+            s.customerPhone ?? "",
+            s.items.reduce((a, i) => a + i.qty, 0),
+            s.payments.map((p) => t(p.method)).join("+") || "held",
+            money(s.total, cur),
+          ]),
+        });
+      else
+        await exportTablePdf({
+          ...common,
+          title: t("salesByCustomer"),
+          filename: `sales-by-customer-${range.from}-${range.to}.pdf`,
+          columns: [
+            t("name"),
+            t("phone"),
+            t("bills"),
+            t("items"),
+            t("totalSpent"),
+          ],
+          rows: (data?.byCust ?? []).map((c) => [
+            c.name,
+            c.phone,
+            c.bills,
+            c.items,
+            money(c.spent, cur),
+          ]),
+        });
+      toast.success(t("exported"));
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF export failed");
+    }
+  }
+
   const tableHead = "border-b text-left text-xs text-muted-foreground";
   const fmt = (n: number) => money(n, cur);
 
@@ -270,58 +351,69 @@ export default function Reports() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-2">
-        <div>
-          <p className="mb-1 text-xs text-muted-foreground">{t("from")}</p>
-          <Input
-            type="date"
-            className="num w-40"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
+      <div className="flex flex-row gap-10">
+        {/* ROW 1: Date Filter Controls */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <p className="mb-1 text-sm font-bold text-muted-foreground">
+              {t("from")}
+            </p>
+            <Input
+              type="date"
+              className="num w-40"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-sm font-bold text-muted-foreground">
+              {t("to")}
+            </p>
+            <Input
+              type="date"
+              className="num w-40"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </div>
+          <Button onClick={() => setRange({ from, to })}>{t("apply")}</Button>
         </div>
-        <div>
-          <p className="mb-1 text-xs text-muted-foreground">{t("to")}</p>
-          <Input
-            type="date"
-            className="num w-40"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
+
+        {/* ROW 2: Report Type & Actions */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-44">
+            <p className="mb-1 text-sm font-bold text-muted-foreground">
+              {t("reportType")}
+            </p>
+            <Select value={rt} onValueChange={(v) => v && setRt(v as RT)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="product">{t("salesByProduct")}</SelectItem>
+                <SelectItem value="sales">{t("allSales")}</SelectItem>
+                <SelectItem value="customer">{t("salesByCustomer")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button variant="secondary" onClick={exportCurrent}>
+            <Download className="mr-1.5 size-4" />
+            {t("export")}
+          </Button>
+          <Button variant="secondary" onClick={exportCurrentPdf}>
+            <FileDown className="mr-1.5 size-4" />
+            {t("exportPdf")}
+          </Button>
         </div>
-        <Button variant="outline" onClick={() => setRange({ from, to })}>
-          {t("apply")}
-        </Button>
-        <div className="min-w-44">
-          <p className="mb-1 text-xs text-muted-foreground">
-            {t("reportType")}
-          </p>
-          <Select value={rt} onValueChange={(v) => v && setRt(v as RT)}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All Sales">{t("allSales")}</SelectItem>
-              <SelectItem value="All Product">{t("salesByProduct")}</SelectItem>
-              <SelectItem value="All Customers">
-                {t("salesByCustomer")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button variant="outline" onClick={exportCurrent}>
-          <Download className="mr-1.5 size-4" />
-          {t("export")}
-        </Button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {(
           [
             ["revenue", money(data?.revenue ?? 0, cur), "text-emerald-600"],
-            ["profit", money(data?.profit ?? 0, cur), "text-emerald-600"],
+            ["profit", money(data?.profit ?? 0, cur), "text-sky-600"],
             ["transactions", String(data?.count ?? 0), ""],
-            ["avgBasket", money(data?.avg ?? 0, cur), ""],
+            ["totalProducts", String(data?.products ?? 0), ""],
           ] as const
         ).map(([k, v, cls]) => (
           <Card key={k}>
@@ -338,14 +430,26 @@ export default function Reports() {
         title={t("dailySales")}
         defaultOpen={false}
         actions={
-          <SegmentedToggle
-            value={dailyType}
-            onChange={setDailyType}
-            options={[
-              { value: "line", label: t("chartLine"), icon: LineChart },
-              { value: "pie", label: t("chartPie"), icon: PieChart },
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <SegmentedToggle
+              value={dailyType}
+              onChange={setDailyType}
+              options={[
+                { value: "line", label: t("chartLine"), icon: LineChart },
+                { value: "pie", label: t("chartPie"), icon: PieChart },
+              ]}
+            />
+            {dailyType === "pie" && (
+              <SegmentedToggle
+                value={pieMetric}
+                onChange={setPieMetric}
+                options={[
+                  { value: "r", label: t("revenue"), icon: CircleDollarSign },
+                  { value: "p", label: t("profit"), icon: TrendingUp },
+                ]}
+              />
+            )}
+          </div>
         }
       >
         {dailyType === "line" ? (
@@ -365,14 +469,14 @@ export default function Reports() {
         ) : (
           <SharePie
             items={(data?.daily ?? [])
-              .filter((d) => d.r > 0)
-              .map((d) => ({ name: d.d.slice(5), value: d.r }))}
+              .filter((d) => d[pieMetric] > 0)
+              .map((d) => ({ name: d.d.slice(5), value: d[pieMetric] }))}
             format={fmt}
           />
         )}
       </ChartCard>
 
-      {rt === "All Product" && (
+      {rt === "product" && (
         <>
           <ChartCard title={t("topProducts")}>
             <BarList
@@ -425,7 +529,7 @@ export default function Reports() {
         </>
       )}
 
-      {rt === "All Sales" && (
+      {rt === "sales" && (
         <Card>
           <CardContent className="p-4">
             <h2 className="mb-2 text-sm font-semibold">{t("allSales")}</h2>
@@ -502,7 +606,7 @@ export default function Reports() {
         </Card>
       )}
 
-      {rt === "All Customers" && (
+      {rt === "customer" && (
         <>
           <ChartCard title={t("topCustomers")}>
             <BarList
@@ -595,7 +699,7 @@ export default function Reports() {
             <div className="flex justify-end border-t pt-3">
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 onClick={() =>
                   csv(
                     "payment-mix",
@@ -615,7 +719,7 @@ export default function Reports() {
           actions={
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               onClick={() =>
                 csv(
                   "low-stock",
