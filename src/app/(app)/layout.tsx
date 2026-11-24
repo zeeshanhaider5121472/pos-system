@@ -36,7 +36,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [lic, setLic] = useState<LicensePayload | null>(null);
   const [open, setOpen] = useState(false);
 
-  // apply the saved font size (Settings → Font Size) across the whole app
+  // apply the saved UI size (Settings → UI Size) across the whole app
   useEffect(() => {
     const apply = (v: unknown) => {
       if (typeof v === "number")
@@ -63,14 +63,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [path, router]);
 
-  if (!lic)
-    return (
-      <div className="grid min-h-screen place-items-center">
-        <RefreshCw className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-
-  const f = lic.features ?? {};
+  // IMPORTANT: {children} must ALWAYS be rendered. Conditionally hiding it
+  // (e.g. behind a loading spinner) drops the page segment from Next.js'
+  // instant-navigation validation — the "Could not validate that a segment in
+  // your UI has instant navigation" build error.
+  const f = lic?.features ?? {};
   const links = NAV.filter((n) => f[n.flag] !== false);
   const nav = (cls: string) =>
     links.map((n) => (
@@ -91,10 +88,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="mb-6 flex items-center gap-2 px-2">
           <Store className="size-5" />
           <span className="truncate text-sm font-semibold">
-            {String(lic.branding?.shopName ?? t("appName"))}
+            {lic
+              ? String(lic.branding?.shopName ?? t("appName"))
+              : t("appName")}
           </span>
         </div>
-        {nav("text-muted-foreground hover:bg-accent/60" + (path ? "" : ""))}
+        {nav("text-muted-foreground hover:bg-accent/60")}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex items-center gap-2 border-b bg-background px-4 py-2.5">
@@ -111,6 +110,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SheetContent>
           </Sheet>
           <div className="flex-1" />
+          {!lic && (
+            <RefreshCw className="size-3.5 animate-spin text-muted-foreground" />
+          )}
           <button
             onClick={() => setLang(lang === "en" ? "ur" : "en")}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
@@ -118,13 +120,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Languages className="size-3.5" />
             {lang === "en" ? "اردو" : "English"}
           </button>
-          <Link
-            href="/settings"
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-          >
-            <ShieldCheck className="size-3.5" />
-            {t("validUntil")} {lic.exp}
-          </Link>
+          {lic && (
+            <Link
+              href="/settings"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+            >
+              <ShieldCheck className="size-3.5" />
+              {t("validUntil")} {lic.exp}
+            </Link>
+          )}
         </header>
         <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
       </div>

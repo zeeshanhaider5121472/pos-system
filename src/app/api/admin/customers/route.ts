@@ -57,17 +57,12 @@ export async function POST(req: NextRequest) {
       Object.entries(b.features ?? {}).map(([k, v]) => [k, v === true]),
     ),
     branding: {
+      // keep fields no longer edited in the admin UI (address, phone,
+      // currency, tax, footers, logo) — the shop overrides them locally in
+      // Settings → Shop Details anyway, and old data must not be lost
+      ...(prev.branding ?? {}),
       shopName: clean(b.branding?.shopName, 60),
       shopNameUr: clean(b.branding?.shopNameUr, 60),
-      address: clean(b.branding?.address, 200),
-      phone: clean(b.branding?.phone, 30),
-      footerEn: clean(b.branding?.footerEn, 200),
-      footerUr: clean(b.branding?.footerUr, 200),
-      currency: clean(b.branding?.currency, 8) || "Rs",
-      taxRate: Math.max(0, Math.min(50, Number(b.branding?.taxRate) || 0)),
-      taxName: clean(b.branding?.taxName, 12) || "Tax",
-      // large limit: allows https URLs and embedded data:image/... logos
-      logoUrl: clean(b.branding?.logoUrl, 300_000),
     },
     updatedAt: Date.now(),
   };

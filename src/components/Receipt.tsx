@@ -1,7 +1,9 @@
 "use client";
-// A4 full-page sales receipt. Labels come from the sale's own receiptLang
-// (set at checkout from Settings → Receipt Language), NOT from the UI
-// language — so an English UI can still print an Urdu receipt.
+// A4 full-page sales receipt. The language follows the CURRENT Settings →
+// Receipt Language (so re-prints always match today's setting, not the
+// language that happened to be selected when the sale was made). The logo
+// is the fixed bundled file public/icons/logo.png (SHOP_LOGO).
+import { SHOP_LOGO, useReceiptLang } from "@/lib/branding";
 import type { Sale } from "@/lib/db";
 import { useState } from "react";
 
@@ -94,15 +96,15 @@ export function Receipt({
   branding: Record<string, any>;
   watermark?: boolean;
 }) {
-  const lang = sale.receiptLang ?? "en";
+  const langSetting = useReceiptLang();
+  const lang = langSetting ?? sale.receiptLang ?? "en";
   const L = T[lang === "ur" ? "ur" : "en"];
   const both = lang === "both"; // bilingual: English labels + Urdu accents
   const ur = lang === "ur" || both;
   const cur = String(branding.currency ?? "Rs");
   const taxName = String(branding.taxName ?? "Tax");
-  // logo: license branding logoUrl wins; otherwise the shop's own
-  // public/icons/logo.png (bundled with the app) is used automatically
-  const logo = String(branding.logoUrl ?? "") || "/icons/logo.png";
+  // the logo is always the file bundled with the app (public/icons/logo.png)
+  const logo = SHOP_LOGO;
   const [logoOk, setLogoOk] = useState(true);
   const cash = sale.payments.find((p) => p.method === "cash");
   const change = cash ? cash.amount - sale.total : 0;

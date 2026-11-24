@@ -21,6 +21,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  shareReceiptOnWhatsApp,
+  useBranding,
+  useFeature,
+} from "@/lib/branding";
+import {
   db,
   getSetting,
   type Customer,
@@ -29,10 +34,11 @@ import {
 } from "@/lib/db";
 import { money } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { canSell, evaluateLicense, getLicense } from "@/lib/license";
+import { canSell, evaluateLicense } from "@/lib/license";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   Lock,
+  MessageCircle,
   Minus,
   Pause,
   Plus,
@@ -76,8 +82,8 @@ export default function POS() {
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [sellable, setSellable] = useState(true);
 
-  const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = lic?.branding ?? {};
+  const branding = useBranding();
+  const whatsappOn = useFeature("whatsappReceipt");
   const { print, holder } = useReceiptPrinter(branding);
   const taxRate = Number(branding.taxRate) || 0;
   const cur = String(branding.currency ?? "Rs");
@@ -507,7 +513,7 @@ export default function POS() {
             <Input
               inputMode="numeric"
               className="num h-8 flex-1"
-              placeholder={`${t("discount")} (Rs)`}
+              placeholder={`${t("discount")} (${cur})`}
               value={billDisc}
               onChange={(e) => setBillDisc(e.target.value)}
             />
@@ -629,6 +635,18 @@ export default function POS() {
             <Button variant="outline" onClick={() => setLastSale(null)}>
               {t("newSale")}
             </Button>
+            {whatsappOn && (
+              <Button
+                variant="outline"
+                disabled={!lastSale}
+                onClick={() =>
+                  lastSale && shareReceiptOnWhatsApp(lastSale, branding)
+                }
+              >
+                <MessageCircle className="mr-1.5 size-4" />
+                {t("whatsapp")}
+              </Button>
+            )}
             <Button
               disabled={!lastSale}
               onClick={() => lastSale && print(lastSale)}

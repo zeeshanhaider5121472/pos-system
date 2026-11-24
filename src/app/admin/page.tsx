@@ -14,11 +14,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FEATURES } from "@/lib/features";
-import { LogOut, Plus, RotateCcw } from "lucide-react";
+import { Home, LogOut, Plus, RotateCcw, ShieldAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
+// Tax, currency, phone, address and receipt footers are NOT managed here
+// anymore — the shop edits them itself in the app under Settings → Shop
+// Details. The logo is the bundled file public/icons/logo.png.
 const blank = {
   cid: "",
   status: "active",
@@ -29,14 +32,6 @@ const blank = {
   branding: {
     shopName: "",
     shopNameUr: "",
-    address: "",
-    phone: "",
-    footerEn: "Exchange within 7 days with receipt",
-    footerUr: "7 دن کے اندر رسید کے ساتھ تبدیلی ممکن ہے",
-    currency: "Rs",
-    taxRate: 0,
-    taxName: "Tax",
-    logoUrl: "",
   },
 };
 
@@ -51,6 +46,8 @@ export default function Admin() {
   const [list, setList] = useState<any[]>([]);
   const [form, setForm] = useState<any>(null);
   const [code, setCode] = useState("");
+  // shown after every save — remind the owner to log out of this device
+  const [reminder, setReminder] = useState(false);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/admin/customers");
@@ -70,6 +67,7 @@ export default function Admin() {
     if (!r.ok) return toast.error("Save failed");
     toast.success("Saved");
     setForm(null);
+    setReminder(true);
     load();
   }
   async function genCode(cid: string) {
@@ -111,6 +109,28 @@ export default function Admin() {
           </Button>
         </div>
       </div>
+
+      {reminder && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <ShieldAlert className="size-4 shrink-0" />
+          <p className="min-w-48 flex-1">
+            Changes saved. You are still logged in as <b>admin</b> on this
+            device — log out to keep it secure.
+          </p>
+          <Button size="sm" onClick={logout}>
+            <LogOut className="mr-1 size-3.5" />
+            Log out now
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setReminder(false)}
+          >
+            Stay logged in
+          </Button>
+        </div>
+      )}
+
       <Card>
         <CardContent className="divide-y p-0">
           {[...list]
@@ -178,6 +198,17 @@ export default function Admin() {
         </CardContent>
       </Card>
 
+      <p className="flex items-start gap-2 text-xs text-muted-foreground">
+        <Home className="mt-0.5 size-3.5 shrink-0" />
+        Address, phone, currency, tax and receipt footers are now edited by the
+        shop itself in the app under Settings → Shop Details. The receipt logo
+        is the file bundled with the app at{" "}
+        <span className="num font-medium text-foreground">
+          public/icons/logo.png
+        </span>{" "}
+        — replace that file to change it.
+      </p>
+
       <Dialog open={!!form} onOpenChange={(o) => !o && setForm(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -197,6 +228,10 @@ export default function Admin() {
                       setForm({ ...form, cid: e.target.value.toUpperCase() })
                     }
                   />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Permanent once created — it is the license key in the
+                    registry and the login ID the shop types in.
+                  </p>
                 </div>
                 <div>
                   <Label>Expiry</Label>
@@ -263,110 +298,6 @@ export default function Admin() {
                         branding: {
                           ...form.branding,
                           shopNameUr: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Address</Label>
-                  <Input
-                    value={form.branding.address}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: { ...form.branding, address: e.target.value },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Phone</Label>
-                  <Input
-                    value={form.branding.phone}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: { ...form.branding, phone: e.target.value },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Currency</Label>
-                  <Input
-                    value={form.branding.currency}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: {
-                          ...form.branding,
-                          currency: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Tax %</Label>
-                  <Input
-                    type="number"
-                    value={form.branding.taxRate}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: {
-                          ...form.branding,
-                          taxRate: Number(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Footer (EN)</Label>
-                  <Input
-                    value={form.branding.footerEn}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: {
-                          ...form.branding,
-                          footerEn: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Footer (Urdu)</Label>
-                  <Input
-                    className="urdu"
-                    value={form.branding.footerUr}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: {
-                          ...form.branding,
-                          footerUr: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>
-                    Logo URL (printed on receipts — https link or data:image/…)
-                  </Label>
-                  <Input
-                    placeholder="https://example.com/logo.png"
-                    value={form.branding.logoUrl ?? ""}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        branding: {
-                          ...form.branding,
-                          logoUrl: e.target.value,
                         },
                       })
                     }

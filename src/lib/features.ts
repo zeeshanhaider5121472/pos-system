@@ -16,5 +16,5 @@ export const DEFAULT_FEATURES: Record<string, boolean> = {
   reportsBasic: true,
   reportsAdvanced: false,
   exports: true,
-  whatsappReceipt: false,
+  whatsappReceipt: true,
 };

@@ -11,12 +11,16 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  shareReceiptOnWhatsApp,
+  useBranding,
+  useFeature,
+} from "@/lib/branding";
 import { db, type Customer, type Sale } from "@/lib/db";
 import { money } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { getLicense } from "@/lib/license";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Printer, UserPlus } from "lucide-react";
+import { MessageCircle, Printer, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -25,9 +29,9 @@ export default function Customers() {
   const [form, setForm] = useState<any>(null);
   const [hist, setHist] = useState<Customer | null>(null);
 
-  const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = lic?.branding ?? {};
+  const branding = useBranding();
   const cur = String(branding.currency ?? "Rs");
+  const whatsappOn = useFeature("whatsappReceipt");
   const { print, holder } = useReceiptPrinter(branding);
 
   const list = useLiveQuery(() => db.customers.orderBy("name").toArray(), []);
@@ -207,6 +211,19 @@ export default function Customers() {
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
                   <span className="num font-medium">{money(s.total, cur)}</span>
+                  {whatsappOn && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-7"
+                      title={t("whatsapp")}
+                      onClick={() =>
+                        shareReceiptOnWhatsApp(s, branding, hist?.phone)
+                      }
+                    >
+                      <MessageCircle className="size-3.5" />
+                    </Button>
+                  )}
                   <Button
                     size="icon"
                     variant="ghost"

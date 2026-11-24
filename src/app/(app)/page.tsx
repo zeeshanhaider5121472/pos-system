@@ -2,15 +2,20 @@
 import { useReceiptPrinter } from "@/components/PrintReceipt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  shareReceiptOnWhatsApp,
+  useBranding,
+  useFeature,
+} from "@/lib/branding";
 import { db, getSetting, type Sale } from "@/lib/db";
 import { dayStart, money } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { getLicense } from "@/lib/license";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   AlertTriangle,
   PackageX,
   Printer,
+  Share2,
   ShoppingBag,
   TrendingUp,
   UserRound,
@@ -20,9 +25,9 @@ import Link from "next/link";
 
 export default function Dashboard() {
   const { t } = useT();
-  const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = lic?.branding ?? {};
+  const branding = useBranding();
   const cur = String(branding.currency ?? "Rs");
+  const whatsappOn = useFeature("whatsappReceipt");
   const { print, holder } = useReceiptPrinter(branding);
 
   const agg = useLiveQuery(async () => {
@@ -170,6 +175,17 @@ export default function Dashboard() {
                 >
                   {money(s.total, cur)} · {s.status}
                 </span>
+                {whatsappOn && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 shrink-0"
+                    title={t("whatsapp")}
+                    onClick={() => shareReceiptOnWhatsApp(s, branding)}
+                  >
+                    <Share2 className="size-4" /> {/* Swapped icon here */}
+                  </Button>
+                )}
                 <Button
                   size="icon"
                   variant="ghost"

@@ -3,6 +3,8 @@ import { AdminLoginForm, LockBar } from "@/components/AdminGate";
 import { Receipt } from "@/components/Receipt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -10,6 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  getOverrides,
+  saveOverrides,
+  SHOP_LOGO,
+  useBranding,
+  type ShopOverrides,
+} from "@/lib/branding";
 import { db, getSetting, LOCAL_TABLES, setSetting, type Sale } from "@/lib/db";
 import { download, ymd } from "@/lib/format";
 import { useT } from "@/lib/i18n";
@@ -18,6 +27,7 @@ import { useShopLockConfigured, useShopUnlocked } from "@/lib/shop-auth";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   Download,
+  Image as ImageIcon,
   LockKeyhole,
   Minus,
   Plus,
@@ -26,20 +36,32 @@ import {
   ShieldAlert,
   Upload,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+
+/** UI size presets — scale the whole app (text, buttons, spacing) */
+const SIZES: [string, number][] = [
+  ["xs", 80],
+  ["sm", 90],
+  ["md", 100],
+  ["lg", 110],
+];
 
 export default function Settings() {
   const { t, lang, setLang } = useT();
   const fileRef = useRef<HTMLInputElement>(null);
-  const printRef = useRef<HTMLDivElement>(null);
   const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = lic?.branding ?? {};
+  const branding = useBranding();
   const [rLang, setRLang] = useState<string>("en");
   useLiveQuery(
     async () => setRLang(((await getSetting("receiptLang")) ?? "en") as string),
     [],
   );
+
+  // test-receipt timestamp — set on the client (Date.now() must not run
+  // during the prerender pass)
+  const [now, setNow] = useState(0);
+  useEffect(() => setNow(Date.now()), []);
 
   const lastBackup = useLiveQuery(
     async () => (await getSetting("lastBackupAt")) as number | undefined,
@@ -50,7 +72,7 @@ export default function Settings() {
   const lockConfigured = useShopLockConfigured();
   const unlocked = useShopUnlocked();
 
-  // font size (applies to the whole app, persisted locally)
+  // UI size (applies to the whole app, persisted locally)
   const [scale, setScale] = useState(100);
   useLiveQuery(async () => {
     const s = await getSetting("fontScale");
@@ -62,6 +84,19 @@ export default function Settings() {
     setSetting("fontScale", c);
     document.documentElement.style.fontSize = `${c}%`;
     window.dispatchEvent(new CustomEvent("fontscale", { detail: c }));
+  }
+
+  // Shop Details — local overrides on top of the license branding
+  const [od, setOd] = useState<ShopOverrides | null>(null);
+  useEffect(() => {
+    getOverrides().then((o) => setOd({ address: "", phone: "", ...o }));
+  }, []);
+  const set = (k: keyof ShopOverrides, v: string) =>
+    setOd((o) => (o ? { ...o, [k]: v } : o));
+  async function saveShop() {
+    if (!od) return;
+    await saveOverrides(od);
+    toast.success(t("saved"));
   }
 
   async function exportBackup() {
@@ -94,7 +129,7 @@ export default function Settings() {
     location.reload();
   }
   const testSale: Sale = {
-    ts: Date.now(),
+    ts: now,
     receiptNo: "R-TEST",
     customerName: "Test Customer",
     customerPhone: "0300 1234567",
@@ -187,19 +222,33 @@ export default function Settings() {
               <SelectItem value="both">{t("both")}</SelectItem>
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            {t("receiptLangNote")}
+          </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardContent className="space-y-3 p-4">
-          <h2 className="text-sm font-semibold">{t("fontSize")}</h2>
-          <p className="text-xs text-muted-foreground">{t("fontSizeHint")}</p>
-          <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">{t("uiSize")}</h2>
+          <p className="text-xs text-muted-foreground">{t("uiSizeHint")}</p>
+          <div className="flex flex-wrap gap-2">
+            {SIZES.map(([k, v]) => (
+              <Button
+                key={k}
+                variant={scale === v ? "default" : "outline"}
+                onClick={() => applyScale(v)}
+              >
+                {t(k)}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
             <Button
               variant="outline"
               size="icon"
               disabled={scale <= 80}
-              onClick={() => applyScale(scale - 10)}
+              onClick={() => applyScale(scale - 5)}
             >
               <Minus className="size-4" />
             </Button>
@@ -210,16 +259,13 @@ export default function Settings() {
               variant="outline"
               size="icon"
               disabled={scale >= 140}
-              onClick={() => applyScale(scale + 10)}
+              onClick={() => applyScale(scale + 5)}
             >
               <Plus className="size-4" />
             </Button>
-            <Button
-              variant={scale === 100 ? "default" : "outline"}
-              onClick={() => applyScale(100)}
-            >
-              {t("normal")}
-            </Button>
+            <span className="text-xs text-muted-foreground">
+              {t("fineTune")}
+            </span>
           </div>
           <p
             className="text-sm text-muted-foreground"
@@ -230,18 +276,125 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="space-y-2 p-4">
-          <h2 className="text-sm font-semibold">{t("branding")}</h2>
-          <p className="text-sm">{String(branding.shopName ?? "—")}</p>
-          <p className="urdu text-sm">{String(branding.shopNameUr ?? "")}</p>
-          <p className="text-xs text-muted-foreground">
-            {String(branding.address ?? "")} · {String(branding.phone ?? "")}
-          </p>
-          <p className="num text-xs text-muted-foreground">
-            {String(branding.currency ?? "Rs")} · {t("tax")}{" "}
-            {String(branding.taxRate ?? 0)}%
-          </p>
+      {/* Shop Details — tax, currency, phone, address and receipt footers
+          live HERE now (editable by the shop, not in the owner's admin) */}
+      <Card className="md:col-span-2">
+        <CardContent className="space-y-3 p-4">
+          <div>
+            <h2 className="text-sm font-semibold">{t("shopDetails")}</h2>
+            <p className="text-xs text-muted-foreground">
+              {t("shopDetailsHint")} {t("licenseDefaults")}
+            </p>
+          </div>
+          {od && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <Label>{t("shopName")}</Label>
+                <Input
+                  value={od.shopName ?? ""}
+                  placeholder={String(lic?.branding?.shopName ?? "")}
+                  onChange={(e) => set("shopName", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>{t("shopNameUr")}</Label>
+                <Input
+                  className="urdu"
+                  value={od.shopNameUr ?? ""}
+                  placeholder={String(lic?.branding?.shopNameUr ?? "")}
+                  onChange={(e) => set("shopNameUr", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>{t("phone")}</Label>
+                <Input
+                  className="num"
+                  inputMode="tel"
+                  value={od.phone ?? ""}
+                  placeholder={String(lic?.branding?.phone ?? "")}
+                  onChange={(e) => set("phone", e.target.value)}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label>{t("address")}</Label>
+                <Input
+                  value={od.address ?? ""}
+                  placeholder={String(lic?.branding?.address ?? "")}
+                  onChange={(e) => set("address", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>{t("currency")}</Label>
+                <Input
+                  className="num"
+                  value={od.currency ?? ""}
+                  placeholder={String(lic?.branding?.currency ?? "Rs")}
+                  onChange={(e) => set("currency", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>{t("taxName")}</Label>
+                <Input
+                  value={od.taxName ?? ""}
+                  placeholder={String(lic?.branding?.taxName ?? "Tax")}
+                  onChange={(e) => set("taxName", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>{t("taxRate")}</Label>
+                <Input
+                  className="num"
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={od.taxRate ?? ""}
+                  placeholder={String(lic?.branding?.taxRate ?? 0)}
+                  onChange={(e) =>
+                    setOd((o) =>
+                      o
+                        ? {
+                            ...o,
+                            taxRate:
+                              e.target.value === ""
+                                ? undefined
+                                : Number(e.target.value),
+                          }
+                        : o,
+                    )
+                  }
+                />
+              </div>
+              <div>
+                <Label>{t("footerEn")}</Label>
+                <Input
+                  value={od.footerEn ?? ""}
+                  placeholder={String(lic?.branding?.footerEn ?? "")}
+                  onChange={(e) => set("footerEn", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>{t("footerUr")}</Label>
+                <Input
+                  className="urdu"
+                  value={od.footerUr ?? ""}
+                  placeholder={String(lic?.branding?.footerUr ?? "")}
+                  onChange={(e) => set("footerUr", e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <ImageIcon className="mt-0.5 size-3.5 shrink-0" />
+            <p>
+              {t("logoNote")}{" "}
+              <span className="num font-medium text-foreground">
+                public{SHOP_LOGO}
+              </span>
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={saveShop}>{t("save")}</Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -297,8 +450,8 @@ export default function Settings() {
             </Button>
           </div>
           <div className="receipt-holder">
-            <div ref={printRef} id="receipt-print">
-              <Receipt sale={testSale} branding={branding} />
+            <div id="receipt-print">
+              {now > 0 && <Receipt sale={testSale} branding={branding} />}
             </div>
           </div>
         </CardContent>

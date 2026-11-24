@@ -1,5 +1,12 @@
 "use client";
-import { BarList, LineChart } from "@/components/Charts";
+import {
+  BarList,
+  CHART_COLORS,
+  ChartCard,
+  SegmentedToggle,
+  SharePie,
+  TrendChart,
+} from "@/components/Charts";
 import { useReceiptPrinter } from "@/components/PrintReceipt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,34 +18,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  shareReceiptOnWhatsApp,
+  useBranding,
+  useFeature,
+} from "@/lib/branding";
 import { db } from "@/lib/db";
 import { download, money, ymd } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { getLicense } from "@/lib/license";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Download, Printer } from "lucide-react";
-import { useState } from "react";
+import {
+  BarChart3,
+  Download,
+  LineChart,
+  MessageCircle,
+  PieChart,
+  Printer,
+  RefreshCw,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-type RT = "product" | "sales" | "customer";
+type RT = "All Product" | "All Sales" | "All Customers";
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 
 export default function Reports() {
   const { t } = useT();
-  const [from, setFrom] = useState(ymd(addDays(new Date(), -29)));
-  const [to, setTo] = useState(ymd(new Date()));
-  const [range, setRange] = useState({
-    from: ymd(addDays(new Date(), -29)),
-    to: ymd(new Date()),
-  });
-  const [rt, setRt] = useState<RT>("product");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const [rt, setRt] = useState<RT>("All Sales");
+  const [dailyType, setDailyType] = useState<"line" | "pie">("line");
+  const [mixType, setMixType] = useState<"pie" | "bars">("pie");
 
-  const lic = useLiveQuery(() => getLicense(), undefined);
-  const branding = lic?.branding ?? {};
+  // default range = last 30 days, computed on the client only (new Date()
+  // must not run during the prerender pass with Cache Components)
+  useEffect(() => {
+    const f = ymd(addDays(new Date(), -29));
+    const t2 = ymd(new Date());
+    setFrom(f);
+    setTo(t2);
+    setRange({ from: f, to: t2 });
+  }, []);
+
+  const branding = useBranding();
   const cur = String(branding.currency ?? "Rs");
+  const whatsappOn = useFeature("whatsappReceipt");
   const { print, holder } = useReceiptPrinter(branding);
 
   const data = useLiveQuery(async () => {
+    if (!range) return null;
     const start = new Date(range.from + "T00:00:00").getTime();
     const end = new Date(range.to + "T23:59:59").getTime();
     const sales = (
@@ -177,6 +206,7 @@ export default function Reports() {
   }, [range]);
 
   function csv(name: string, headers: string[], rows: (string | number)[][]) {
+    if (!range) return;
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
     const body = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n");
     download(
@@ -187,7 +217,8 @@ export default function Reports() {
     toast.success(t("export"));
   }
   function exportCurrent() {
-    if (rt === "product")
+    if (!range) return;
+    if (rt === "All Product")
       csv(
         "sales-by-product",
         ["SKU", "Name", "Qty", "Revenue", "Profit"],
@@ -199,7 +230,7 @@ export default function Reports() {
           Math.round(r.profit),
         ]),
       );
-    else if (rt === "sales")
+    else if (rt === "All Sales")
       csv(
         "all-sales",
         ["Receipt", "Date", "Customer", "Phone", "Items", "Payment", "Total"],
@@ -228,6 +259,14 @@ export default function Reports() {
   }
 
   const tableHead = "border-b text-left text-xs text-muted-foreground";
+  const fmt = (n: number) => money(n, cur);
+
+  if (!range)
+    return (
+      <div className="grid min-h-[50vh] place-items-center">
+        <RefreshCw className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
 
   return (
     <div className="space-y-4">
@@ -262,9 +301,11 @@ export default function Reports() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="product">{t("salesByProduct")}</SelectItem>
-              <SelectItem value="sales">{t("allSales")}</SelectItem>
-              <SelectItem value="customer">{t("salesByCustomer")}</SelectItem>
+              <SelectItem value="All Sales">{t("allSales")}</SelectItem>
+              <SelectItem value="All Product">{t("salesByProduct")}</SelectItem>
+              <SelectItem value="All Customers">
+                {t("salesByCustomer")}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -292,43 +333,57 @@ export default function Reports() {
         ))}
       </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <h2 className="mb-2 text-sm font-semibold">{t("dailySales")}</h2>
-          <LineChart
-            labels={(data?.daily ?? []).map((d) => d.d.slice(5))}
-            series={[
-              {
-                name: t("revenue"),
-                color: "#10b981",
-                values: (data?.daily ?? []).map((d) => d.r),
-              },
-              {
-                name: t("profit"),
-                color: "#0ea5e9",
-                values: (data?.daily ?? []).map((d) => d.p),
-              },
+      {/* the big daily chart is collapsible and starts collapsed */}
+      <ChartCard
+        title={t("dailySales")}
+        defaultOpen={false}
+        actions={
+          <SegmentedToggle
+            value={dailyType}
+            onChange={setDailyType}
+            options={[
+              { value: "line", label: t("chartLine"), icon: LineChart },
+              { value: "pie", label: t("chartPie"), icon: PieChart },
             ]}
-            format={(n) => money(n, cur)}
           />
-        </CardContent>
-      </Card>
+        }
+      >
+        {dailyType === "line" ? (
+          <TrendChart
+            rows={(data?.daily ?? []).map((d) => ({
+              d: d.d.slice(5),
+              r: d.r,
+              p: d.p,
+            }))}
+            xKey="d"
+            series={[
+              { key: "r", name: t("revenue"), color: CHART_COLORS.emerald },
+              { key: "p", name: t("profit"), color: CHART_COLORS.sky },
+            ]}
+            format={fmt}
+          />
+        ) : (
+          <SharePie
+            items={(data?.daily ?? [])
+              .filter((d) => d.r > 0)
+              .map((d) => ({ name: d.d.slice(5), value: d.r }))}
+            format={fmt}
+          />
+        )}
+      </ChartCard>
 
-      {rt === "product" && (
+      {rt === "All Product" && (
         <>
-          <Card>
-            <CardContent className="p-4">
-              <h2 className="mb-3 text-sm font-semibold">{t("topProducts")}</h2>
-              <BarList
-                items={(data?.rows ?? []).slice(0, 8).map((r) => ({
-                  label: r.name,
-                  value: r.revenue,
-                  sub: `· ${r.qty}`,
-                }))}
-                format={(n) => money(n, cur)}
-              />
-            </CardContent>
-          </Card>
+          <ChartCard title={t("topProducts")}>
+            <BarList
+              items={(data?.rows ?? []).slice(0, 8).map((r) => ({
+                label: r.name,
+                value: r.revenue,
+                sub: `· ${r.qty}`,
+              }))}
+              format={fmt}
+            />
+          </ChartCard>
           <Card>
             <CardContent className="p-4">
               <h2 className="mb-2 text-sm font-semibold">
@@ -370,7 +425,7 @@ export default function Reports() {
         </>
       )}
 
-      {rt === "sales" && (
+      {rt === "All Sales" && (
         <Card>
           <CardContent className="p-4">
             <h2 className="mb-2 text-sm font-semibold">{t("allSales")}</h2>
@@ -383,7 +438,7 @@ export default function Reports() {
                   <th>{t("items")}</th>
                   <th>{t("method")}</th>
                   <th className="text-right">{t("total")}</th>
-                  <th className="w-8" />
+                  <th className="w-16" />
                 </tr>
               </thead>
               <tbody>
@@ -413,6 +468,17 @@ export default function Reports() {
                       {money(s.total, cur)}
                     </td>
                     <td className="py-1.5 text-right">
+                      {whatsappOn && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          title={t("whatsapp")}
+                          onClick={() => shareReceiptOnWhatsApp(s, branding)}
+                        >
+                          <MessageCircle className="size-3.5" />
+                        </Button>
+                      )}
                       <Button
                         size="icon"
                         variant="ghost"
@@ -436,24 +502,19 @@ export default function Reports() {
         </Card>
       )}
 
-      {rt === "customer" && (
+      {rt === "All Customers" && (
         <>
-          <Card>
-            <CardContent className="p-4">
-              <h2 className="mb-3 text-sm font-semibold">
-                {t("topCustomers")}
-              </h2>
-              <BarList
-                color="#6366f1"
-                items={(data?.byCust ?? []).slice(0, 8).map((c) => ({
-                  label: c.name,
-                  value: c.spent,
-                  sub: `· ${c.bills} ${t("bills")}`,
-                }))}
-                format={(n) => money(n, cur)}
-              />
-            </CardContent>
-          </Card>
+          <ChartCard title={t("topCustomers")}>
+            <BarList
+              color={CHART_COLORS.indigo}
+              items={(data?.byCust ?? []).slice(0, 8).map((c) => ({
+                label: c.name,
+                value: c.spent,
+                sub: `· ${c.bills} ${t("bills")}`,
+              }))}
+              format={fmt}
+            />
+          </ChartCard>
           <Card>
             <CardContent className="p-4">
               <h2 className="mb-2 text-sm font-semibold">
@@ -499,10 +560,39 @@ export default function Reports() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">{t("paymentMix")}</h2>
+        <ChartCard
+          title={t("paymentMix")}
+          actions={
+            <SegmentedToggle
+              value={mixType}
+              onChange={setMixType}
+              options={[
+                { value: "pie", label: t("chartPie"), icon: PieChart },
+                { value: "bars", label: t("chartBars"), icon: BarChart3 },
+              ]}
+            />
+          }
+        >
+          <div className="space-y-3">
+            {mixType === "pie" ? (
+              <SharePie
+                items={(data?.mix ?? []).map(([m, v]) => ({
+                  name: t(m),
+                  value: v,
+                }))}
+                format={fmt}
+              />
+            ) : (
+              <BarList
+                color={CHART_COLORS.amber}
+                items={(data?.mix ?? []).map(([m, v]) => ({
+                  label: t(m),
+                  value: v,
+                }))}
+                format={fmt}
+              />
+            )}
+            <div className="flex justify-end border-t pt-3">
               <Button
                 size="sm"
                 variant="outline"
@@ -518,62 +608,48 @@ export default function Reports() {
                 {t("export")}
               </Button>
             </div>
-            <BarList
-              color="#f59e0b"
-              items={(data?.mix ?? []).map(([m, v]) => ({
-                label: t(m),
-                value: v,
-              }))}
-              format={(n) => money(n, cur)}
-            />
-            {(data?.mix ?? []).length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                {t("noData")}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">{t("lowStockReport")}</h2>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  csv(
-                    "low-stock",
-                    ["SKU", "Stock", "ReorderAt"],
-                    (data?.low ?? []).map((v) => [
-                      v.sku,
-                      v.stock,
-                      v.reorderLevel,
-                    ]),
-                  )
-                }
-              >
-                <Download className="mr-1 size-3.5" />
-                {t("export")}
-              </Button>
+          </div>
+        </ChartCard>
+        <ChartCard
+          title={t("lowStockReport")}
+          actions={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                csv(
+                  "low-stock",
+                  ["SKU", "Stock", "ReorderAt"],
+                  (data?.low ?? []).map((v) => [
+                    v.sku,
+                    v.stock,
+                    v.reorderLevel,
+                  ]),
+                )
+              }
+            >
+              <Download className="mr-1 size-3.5" />
+              {t("export")}
+            </Button>
+          }
+        >
+          {(data?.low ?? []).map((v) => (
+            <div
+              key={v.id}
+              className="flex justify-between border-b py-1.5 text-sm last:border-0"
+            >
+              <span className="num text-muted-foreground">{v.sku}</span>
+              <span className="num font-medium text-red-600">
+                {v.stock} / {v.reorderLevel}
+              </span>
             </div>
-            {(data?.low ?? []).map((v) => (
-              <div
-                key={v.id}
-                className="flex justify-between border-b py-1.5 text-sm last:border-0"
-              >
-                <span className="num text-muted-foreground">{v.sku}</span>
-                <span className="num font-medium text-red-600">
-                  {v.stock} / {v.reorderLevel}
-                </span>
-              </div>
-            ))}
-            {(data?.low ?? []).length === 0 && (
-              <p className="py-4 text-center text-sm text-muted-foreground">
-                {t("noData")}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+          ))}
+          {(data?.low ?? []).length === 0 && (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {t("noData")}
+            </p>
+          )}
+        </ChartCard>
       </div>
 
       {holder}

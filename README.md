@@ -1,3 +1,12 @@
+## Desktop (.exe) readiness
+
+The app is already desktop-compatible — I verified the three things that usually break: all API calls are relative (/api/...), all data lives in IndexedDB/localStorage (works offline, Electron stores it in its own user-data folder), and the logo/assets load from the bundled public/ folder with a fixed path. window.print() also works inside Electron. When you're ready to build the .exe, the right approach is Electron wrapping the Next.js server (keeps your /api/license Upstash routes working):
+
+npm i -D electron electron-builder
+Create electron/main.js that spawns next start -p 3456 (from the packaged .next build) and opens a BrowserWindow at http://localhost:3456
+Add "main": "electron/main.js" to package.json and an electron-builder config (NSIS target for Windows)
+npm run build && npx electron-builder → produces the .exe installer
+
 ## Clothing POS
 
 Offline-first POS for clothing shops (English / اردو). Data lives in the browser(IndexedDB), receipts print on 80mm thermal printers, and a signed licensecontrols the subscription.
