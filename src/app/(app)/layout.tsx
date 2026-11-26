@@ -3,7 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { getSetting } from "@/lib/db";
 import { useT } from "@/lib/i18n";
-import { canBrowse, evaluateLicense, type LicensePayload } from "@/lib/license";
+import {
+  canBrowse,
+  evaluateLicense,
+  isExpired,
+  type LicensePayload,
+} from "@/lib/license";
 import {
   BarChart3,
   Languages,
@@ -68,6 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // instant-navigation validation — the "Could not validate that a segment in
   // your UI has instant navigation" build error.
   const f = lic?.features ?? {};
+  const expired = isExpired(lic);
   const links = NAV.filter((n) => f[n.flag] !== false);
   const nav = (cls: string) =>
     links.map((n) => (
@@ -123,10 +129,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {lic && (
             <Link
               href="/settings"
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-accent ${
+                expired ? "font-semibold text-red-600" : "text-muted-foreground"
+              }`}
             >
               <ShieldCheck className="size-3.5" />
-              {t("validUntil")} {lic.exp}
+              {expired ? t("expired") : `${t("validUntil")} ${lic.exp}`}
             </Link>
           )}
         </header>

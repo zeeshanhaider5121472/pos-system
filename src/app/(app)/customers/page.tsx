@@ -19,8 +19,9 @@ import {
 import { db, type Customer, type Sale } from "@/lib/db";
 import { money } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import { useEditable } from "@/lib/use-license";
 import { useLiveQuery } from "dexie-react-hooks";
-import { MessageCircle, Printer, UserPlus } from "lucide-react";
+import { MessageCircle, Printer, ShieldAlert, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ export default function Customers() {
   const { t } = useT();
   const [form, setForm] = useState<any>(null);
   const [hist, setHist] = useState<Customer | null>(null);
+  const editable = useEditable();
 
   const branding = useBranding();
   const cur = String(branding.currency ?? "Rs");
@@ -71,6 +73,7 @@ export default function Customers() {
   }, [hist]);
 
   async function save() {
+    if (!editable) return toast.error(t("subExpired"));
     const f = form;
     try {
       if (f.id)
@@ -94,17 +97,27 @@ export default function Customers() {
     }
   }
   async function adjust(c: Customer, d: number) {
+    if (!editable) return toast.error(t("subExpired"));
     await db.customers.update(c.id!, { balance: Math.max(0, c.balance + d) });
   }
 
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <Button onClick={() => setForm({ phone: "", name: "", address: "" })}>
+        <Button
+          disabled={!editable}
+          onClick={() => setForm({ phone: "", name: "", address: "" })}
+        >
           <UserPlus className="mr-1.5 size-4" />
           {t("add")}
         </Button>
       </div>
+      {!editable && (
+        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900/70 dark:bg-red-950/20 dark:text-red-400">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          {t("subExpired")}
+        </div>
+      )}
       {(list ?? []).map((c) => {
         const st = stats?.get(c.id!);
         return (
@@ -127,6 +140,7 @@ export default function Customers() {
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={!editable}
                   onClick={() => adjust(c, -c.balance)}
                 >
                   Clear
@@ -138,6 +152,7 @@ export default function Customers() {
               <Button
                 size="icon"
                 variant="ghost"
+                disabled={!editable}
                 onClick={() => setForm({ ...c })}
               >
                 …

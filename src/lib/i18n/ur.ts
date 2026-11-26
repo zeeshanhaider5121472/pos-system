@@ -59,6 +59,7 @@ export const ur: Record<string, string> = {
   updateSubscription: "سبسکرپشن اپڈیٹ کریں",
   needsInternetOnce: "مہینے میں ایک بار انٹرنیٹ درکار ہے",
   validUntil: "درست تا",
+  expired: "ختم شدہ",
   shop: "دکان",
   shopId: "دکان کا ID",
   enterShopId: "اپنے دکان کا ID درج کریں",

@@ -131,5 +131,8 @@ export async function evaluateLicense(): Promise<{
 export const canSell = (s: LicState) => s === "active" || s === "warning";
 export const canBrowse = (s: LicState) =>
   ["active", "warning", "grace"].includes(s);
+/** true when the license expiry date has already passed (read-only applies) */
+export const isExpired = (lic: LicensePayload | null | undefined) =>
+  !!lic && Date.now() > new Date(lic.exp + "T23:59:59").getTime();
 export const clockIsSane = (serverTime: number) =>
   Math.abs(Date.now() - serverTime) < 48 * 3_600_000;

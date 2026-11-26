@@ -22,8 +22,9 @@ import {
 import { db, getSetting, LOCAL_TABLES, setSetting, type Sale } from "@/lib/db";
 import { download, ymd } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { getLicense } from "@/lib/license";
+import { getLicense, isExpired } from "@/lib/license";
 import { useShopLockConfigured, useShopUnlocked } from "@/lib/shop-auth";
+import { useEditable } from "@/lib/use-license";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   Download,
@@ -51,6 +52,8 @@ export default function Settings() {
   const { t, lang, setLang } = useT();
   const fileRef = useRef<HTMLInputElement>(null);
   const lic = useLiveQuery(() => getLicense(), undefined);
+  const editable = useEditable();
+  const expired = isExpired(lic);
   const branding = useBranding();
   const [rLang, setRLang] = useState<string>("en");
   useLiveQuery(
@@ -286,8 +289,17 @@ export default function Settings() {
               {t("shopDetailsHint")} {t("licenseDefaults")}
             </p>
           </div>
+          {!editable && (
+            <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900/70 dark:bg-red-950/20 dark:text-red-400">
+              <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+              {t("subExpired")}
+            </div>
+          )}
           {od && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <fieldset
+              disabled={!editable}
+              className="m-0 grid gap-3 border-0 p-0 sm:grid-cols-2 lg:grid-cols-3"
+            >
               <div>
                 <Label>{t("shopName")}</Label>
                 <Input
@@ -381,7 +393,7 @@ export default function Settings() {
                   onChange={(e) => set("footerUr", e.target.value)}
                 />
               </div>
-            </div>
+            </fieldset>
           )}
           <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             <ImageIcon className="mt-0.5 size-3.5 shrink-0" />
@@ -393,7 +405,9 @@ export default function Settings() {
             </p>
           </div>
           <div className="flex justify-end">
-            <Button onClick={saveShop}>{t("save")}</Button>
+            <Button disabled={!editable} onClick={saveShop}>
+              {t("save")}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -405,10 +419,21 @@ export default function Settings() {
             {t("shopId")}: {lic?.cid || "—"}
           </p>
           <p className="num text-sm">
-            {t("expiry")}: {lic?.exp || "—"} · {t("plan")}: {lic?.plan || "—"}
+            {t("expiry")}:{" "}
+            <span
+              className={expired ? "font-semibold text-red-600" : undefined}
+            >
+              {lic?.exp || "—"}
+            </span>{" "}
+            · {t("plan")}: {lic?.plan || "—"}
           </p>
           <p className="text-sm">
-            {t("status")}: {lic?.status || "—"}
+            {t("status")}:{" "}
+            {expired ? (
+              <span className="font-semibold text-red-600">{t("expired")}</span>
+            ) : (
+              lic?.status || "—"
+            )}
           </p>
           <a
             href="/activation"

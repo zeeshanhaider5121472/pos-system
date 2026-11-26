@@ -59,6 +59,7 @@ export const en: Record<string, string> = {
   updateSubscription: "Update Subscription",
   needsInternetOnce: "Needs internet once a month",
   validUntil: "Valid until",
+  expired: "Expired",
   shop: "Shop",
   shopId: "Shop ID",
   enterShopId: "Enter your Shop ID",

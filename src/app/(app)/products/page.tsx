@@ -23,6 +23,7 @@ import {
 import { db, type Product, type Variant } from "@/lib/db";
 import { useT } from "@/lib/i18n";
 import { useShopLockConfigured, useShopUnlocked } from "@/lib/shop-auth";
+import { useEditable } from "@/lib/use-license";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   PackagePlus,
@@ -281,8 +282,10 @@ export default function Products() {
   // shop-owner admin lock
   const lockConfigured = useShopLockConfigured();
   const unlocked = useShopUnlocked();
+  const editable = useEditable();
   const guarded = (fn: () => void) => () => {
-    if (lockConfigured === false || unlocked) fn();
+    if (!editable) toast.error(t("subExpired"));
+    else if (lockConfigured === false || unlocked) fn();
     else setPending({ fn });
   };
 
@@ -483,7 +486,10 @@ export default function Products() {
             className="pl-9"
           />
         </div>
-        <Button onClick={guarded(() => setForm({ ...blank }))}>
+        <Button
+          disabled={!editable}
+          onClick={guarded(() => setForm({ ...blank }))}
+        >
           <PackagePlus className="mr-1.5 size-4" />
           {t("addProduct")}
         </Button>
@@ -493,6 +499,13 @@ export default function Products() {
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
           {t("lockNotConfigured")}
+        </div>
+      )}
+
+      {!editable && (
+        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900/70 dark:bg-red-950/20 dark:text-red-400">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          {t("subExpired")}
         </div>
       )}
 
@@ -542,6 +555,7 @@ export default function Products() {
                 <Button
                   size="icon"
                   variant="outline"
+                  disabled={!editable}
                   onClick={guarded(() => openEdit(p))}
                 >
                   <Pencil className="size-4" />
@@ -550,6 +564,7 @@ export default function Products() {
                   size="icon"
                   variant="ghost"
                   className="text-red-600"
+                  disabled={!editable}
                   onClick={guarded(() => delProduct(p))}
                 >
                   <Trash2 className="size-4" />
