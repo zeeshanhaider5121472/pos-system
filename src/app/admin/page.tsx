@@ -14,24 +14,30 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FEATURES } from "@/lib/features";
-import { Home, LogOut, Plus, RotateCcw, ShieldAlert } from "lucide-react";
+import { LogOut, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-// Tax, currency, phone, address and receipt footers are NOT managed here
-// anymore — the shop edits them itself in the app under Settings → Shop
-// Details. The logo is the bundled file public/icons/logo.png.
 const blank = {
   cid: "",
   status: "active",
   plan: "monthly",
   expiry: "",
   ds: undefined as string | null | undefined,
+  admin: { user: "", pass: "" },
   features: {} as Record<string, boolean>,
   branding: {
     shopName: "",
     shopNameUr: "",
+    address: "",
+    phone: "",
+    footerEn: "Exchange within 7 days with receipt",
+    footerUr: "7 دن کے اندر رسید کے ساتھ تبدیلی ممکن ہے",
+    currency: "Rs",
+    taxRate: 0,
+    taxName: "Tax",
+    logoUrl: "",
   },
 };
 
@@ -46,13 +52,22 @@ export default function Admin() {
   const [list, setList] = useState<any[]>([]);
   const [form, setForm] = useState<any>(null);
   const [code, setCode] = useState("");
-  // shown after every save — remind the owner to log out of this device
-  const [reminder, setReminder] = useState(false);
+  const [info, setInfo] = useState<any>(null);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/admin/customers");
     if (r.status === 401) return router.replace("/admin/login");
-    setList((await r.json()).list);
+    const j = await r.json().catch(() => ({}));
+    if (!Array.isArray(j.list)) {
+      setList([]);
+      toast.error(
+        j.error === "NOT_CONFIGURED"
+          ? "GITHUB_TOKEN / GITHUB_REPO not set in .env.local — add them and restart npm run dev"
+          : `Could not read db.json from GitHub${j.detail ? ` (${j.detail})` : ""}`,
+      );
+      return;
+    }
+    setList(j.list);
   }, [router]);
   useEffect(() => {
     load();
@@ -64,10 +79,34 @@ export default function Admin() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    if (!r.ok) return toast.error("Save failed");
-    toast.success("Saved");
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok)
+      return toast.error(
+        j.error === "NOT_CONFIGURED"
+          ? "GITHUB_TOKEN not set on this server"
+          : "Save failed — GitHub unreachable?",
+      );
+    toast.success(
+      j.commit ? `Saved — commit ${j.commit.sha} pushed to main` : "Saved",
+    );
     setForm(null);
-    setReminder(true);
+    load();
+  }
+  async function del(cid: string) {
+    if (
+      !confirm(
+        `Delete ${cid}? The shop locks out on its next sync. Git history keeps every old version.`,
+      )
+    )
+      return;
+    const r = await fetch(
+      `/api/admin/customers?cid=${encodeURIComponent(cid)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!r.ok) return toast.error("Delete failed");
+    toast.success("Deleted — commit pushed to main");
     load();
   }
   async function genCode(cid: string) {
@@ -109,38 +148,18 @@ export default function Admin() {
           </Button>
         </div>
       </div>
-
-      {reminder && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <ShieldAlert className="size-4 shrink-0" />
-          <p className="min-w-48 flex-1">
-            Changes saved. You are still logged in as <b>admin</b> on this
-            device — log out to keep it secure.
-          </p>
-          <Button size="sm" onClick={logout}>
-            <LogOut className="mr-1 size-3.5" />
-            Log out now
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setReminder(false)}
-          >
-            Stay logged in
-          </Button>
-        </div>
-      )}
-
       <Card>
         <CardContent className="divide-y p-0">
-          {[...list]
+          {[...(Array.isArray(list) ? list : [])]
             .sort((a, b) => a.expiry.localeCompare(b.expiry))
             .map((s) => {
               const dl = daysLeft(s.expiry);
               return (
                 <div
                   key={s.cid}
-                  className="flex flex-wrap items-center gap-2 p-4 text-sm"
+                  onClick={() => setInfo(s)}
+                  title="Click to view login details"
+                  className="flex flex-wrap cursor-pointer items-center gap-2 p-4 text-sm hover:bg-muted/40"
                 >
                   <div className="min-w-40 flex-1">
                     <p className="font-medium">
@@ -148,7 +167,7 @@ export default function Admin() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {s.cid} · {s.plan}
-                      {s.ds ? "" : " · not activated"}
+                      {s.dsHash ? "" : " · not activated"}
                     </p>
                   </div>
                   <Badge
@@ -169,23 +188,40 @@ export default function Admin() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() =>
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setForm({
                         ...blank,
                         ...s,
                         branding: { ...blank.branding, ...s.branding },
                         features: { ...s.features },
-                      })
-                    }
+                        admin: { user: s.adminUser ?? "", pass: "" },
+                      });
+                    }}
                   >
                     Edit
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => genCode(s.cid)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      genCode(s.cid);
+                    }}
                   >
                     Get Code
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-600 hover:text-red-700"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      del(s.cid);
+                    }}
+                    title="Delete shop"
+                  >
+                    <Trash2 className="size-4" />
                   </Button>
                 </div>
               );
@@ -197,17 +233,6 @@ export default function Admin() {
           )}
         </CardContent>
       </Card>
-
-      <p className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Home className="mt-0.5 size-3.5 shrink-0" />
-        Address, phone, currency, tax and receipt footers are now edited by the
-        shop itself in the app under Settings → Shop Details. The receipt logo
-        is the file bundled with the app at{" "}
-        <span className="num font-medium text-foreground">
-          public/icons/logo.png
-        </span>{" "}
-        — replace that file to change it.
-      </p>
 
       <Dialog open={!!form} onOpenChange={(o) => !o && setForm(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
@@ -228,10 +253,6 @@ export default function Admin() {
                       setForm({ ...form, cid: e.target.value.toUpperCase() })
                     }
                   />
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Permanent once created — it is the license key in the
-                    registry and the login ID the shop types in.
-                  </p>
                 </div>
                 <div>
                   <Label>Expiry</Label>
@@ -273,6 +294,39 @@ export default function Admin() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <Label>Login ID (this shop&apos;s owner)</Label>
+                  <Input
+                    value={form.admin.user}
+                    placeholder="e.g. shop01"
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        admin: { ...form.admin, user: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Login Password</Label>
+                  <Input
+                    type="password"
+                    value={form.admin.pass}
+                    placeholder={
+                      form.cid && list.find((x) => x.cid === form.cid)
+                        ? "blank = keep current"
+                        : "blank = no login lock"
+                    }
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        admin: { ...form.admin, pass: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
                   <Label>Shop Name (EN)</Label>
                   <Input
                     value={form.branding.shopName}
@@ -303,6 +357,110 @@ export default function Admin() {
                     }
                   />
                 </div>
+                <div>
+                  <Label>Address</Label>
+                  <Input
+                    value={form.branding.address}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: { ...form.branding, address: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Phone</Label>
+                  <Input
+                    value={form.branding.phone}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: { ...form.branding, phone: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Currency</Label>
+                  <Input
+                    value={form.branding.currency}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: {
+                          ...form.branding,
+                          currency: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Tax %</Label>
+                  <Input
+                    type="number"
+                    value={form.branding.taxRate}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: {
+                          ...form.branding,
+                          taxRate: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Footer (EN)</Label>
+                  <Input
+                    value={form.branding.footerEn}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: {
+                          ...form.branding,
+                          footerEn: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Footer (Urdu)</Label>
+                  <Input
+                    className="urdu"
+                    value={form.branding.footerUr}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branding: {
+                          ...form.branding,
+                          footerUr: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>
+                  Logo URL (printed on receipts — https link or data:image/…)
+                </Label>
+                <Input
+                  placeholder="https://example.com/logo.png"
+                  value={form.branding.logoUrl ?? ""}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      branding: {
+                        ...form.branding,
+                        logoUrl: e.target.value,
+                      },
+                    })
+                  }
+                />
               </div>
               <div>
                 <Label>Features</Label>
@@ -366,6 +524,78 @@ export default function Admin() {
           >
             Copy
           </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!info} onOpenChange={(o) => !o && setInfo(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Login Details — {info?.branding?.shopName || info?.cid}
+            </DialogTitle>
+          </DialogHeader>
+          {info && (
+            <div className="grid gap-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Shop ID</span>
+                <code className="rounded bg-muted px-2 py-0.5 font-mono font-semibold">
+                  {info.cid}
+                </code>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Login ID</span>
+                {info.adminUser ? (
+                  <code className="rounded bg-muted px-2 py-0.5 font-mono font-semibold">
+                    {info.adminUser}
+                  </code>
+                ) : (
+                  <span className="text-muted-foreground">
+                    not set — no login lock
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Password</span>
+                <span className="text-muted-foreground">
+                  ••••• stored hashed — cannot be shown
+                </span>
+              </div>
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                db.json is public, so passwords are stored as one-way scrypt
+                hashes — they can never be displayed or recovered, not even
+                here. If a shop forgot its password, set a new one below; the
+                old one stops working right after Save.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      `Shop ID: ${info.cid}\nLogin ID: ${info.adminUser || "(not set)"}`,
+                    );
+                    toast.success("Copied");
+                  }}
+                >
+                  Copy IDs
+                </Button>
+                <Button
+                  onClick={() => {
+                    const s = info;
+                    setInfo(null);
+                    setForm({
+                      ...blank,
+                      ...s,
+                      branding: { ...blank.branding, ...s.branding },
+                      features: { ...s.features },
+                      admin: { user: s.adminUser ?? "", pass: "" },
+                    });
+                  }}
+                >
+                  Set New Password
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

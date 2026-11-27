@@ -71,6 +71,10 @@ export const en: Record<string, string> = {
   tooMany: "Too many attempts — try again later",
   unknownShop: "Shop ID not found",
   needInternet: "Could not connect — check internet and retry",
+  registryDown:
+    "License server could not read the registry (db.json) — a server problem, not your internet. Contact the app owner.",
+  needVendorServer:
+    "First-time activation needs the app owner's server — please contact them.",
   clockIssue: "Your device date/time looks wrong — fix it and retry",
   revenue: "Revenue",
   profit: "Profit",
@@ -142,7 +146,7 @@ export const en: Record<string, string> = {
   password: "Password",
   wrongCredentials: "Wrong Shop ID or password",
   lockNotConfigured:
-    "Admin lock is not configured — set SHOP_ID and SHOP_PASSWORD in your hosting environment so only the shop owner can edit products and settings.",
+    "Admin lock is not set up yet — the app owner must set this shop's Login ID and password in the owner console (/admin), then press Update Subscription.",
   offlineUnlock: "Could not verify — check your internet connection",
   lockAdmin: "Log out Admin",
   fontSize: "Font Size",

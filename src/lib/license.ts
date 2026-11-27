@@ -8,7 +8,8 @@ const PUB = process.env.NEXT_PUBLIC_LICENSE_PUBLIC_KEY!;
 export interface LicensePayload {
   cid: string;
   fp: string;
-  ds: string;
+  ds?: string; // legacy codes carried the raw device secret
+  dsHash?: string; // current codes carry sha256(deviceSecret)
   iat: number;
   exp: string;
   plan: string;
@@ -43,6 +44,17 @@ export async function deviceSecret(): Promise<string> {
   return ds;
 }
 
+/** sha256 of the device secret — what db.json stores instead of the raw ds */
+export async function dsHashOf(ds: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(ds),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function verifySig(d: LicensePayload, s: string): boolean {
   try {
     return nacl.sign.detached.verify(
@@ -62,7 +74,8 @@ export async function activateWithCode(
   const { d, s } = JSON.parse(b64.dec(code.trim()));
   if (!verifySig(d, s)) throw new Error("INVALID_CODE");
   if (d.status !== "active") throw new Error("REVOKED");
-  if (d.ds !== myDs) throw new Error("DEVICE_MISMATCH");
+  if (d.dsHash ? (await dsHashOf(myDs)) !== d.dsHash : d.ds !== myDs)
+    throw new Error("DEVICE_MISMATCH");
   const now = String(Date.now());
   await Promise.all([
     setSetting("license", { d, s }),

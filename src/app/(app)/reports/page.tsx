@@ -476,6 +476,101 @@ export default function Reports() {
         )}
       </ChartCard>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard
+          title={t("paymentMix")}
+          defaultOpen={false}
+          actions={
+            <SegmentedToggle
+              value={mixType}
+              onChange={setMixType}
+              options={[
+                { value: "pie", label: t("chartPie"), icon: PieChart },
+                { value: "bars", label: t("chartBars"), icon: BarChart3 },
+              ]}
+            />
+          }
+        >
+          <div className="space-y-3">
+            {mixType === "pie" ? (
+              <SharePie
+                items={(data?.mix ?? []).map(([m, v]) => ({
+                  name: t(m),
+                  value: v,
+                }))}
+                format={fmt}
+              />
+            ) : (
+              <BarList
+                color={CHART_COLORS.amber}
+                items={(data?.mix ?? []).map(([m, v]) => ({
+                  label: t(m),
+                  value: v,
+                }))}
+                format={fmt}
+              />
+            )}
+            <div className="flex justify-end border-t pt-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  csv(
+                    "payment-mix",
+                    ["Method", "Amount"],
+                    (data?.mix ?? []).map(([m, v]) => [m, Math.round(v)]),
+                  )
+                }
+              >
+                <Download className="mr-1 size-3.5" />
+                {t("export")}
+              </Button>
+            </div>
+          </div>
+        </ChartCard>
+        <ChartCard
+          title={t("lowStockReport")}
+          defaultOpen={false}
+          actions={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                csv(
+                  "low-stock",
+                  ["SKU", "Stock", "ReorderAt"],
+                  (data?.low ?? []).map((v) => [
+                    v.sku,
+                    v.stock,
+                    v.reorderLevel,
+                  ]),
+                )
+              }
+            >
+              <Download className="mr-1 size-3.5" />
+              {t("export")}
+            </Button>
+          }
+        >
+          {(data?.low ?? []).map((v) => (
+            <div
+              key={v.id}
+              className="flex justify-between border-b py-1.5 text-sm last:border-0"
+            >
+              <span className="num text-muted-foreground">{v.sku}</span>
+              <span className="num font-medium text-red-600">
+                {v.stock} / {v.reorderLevel}
+              </span>
+            </div>
+          ))}
+          {(data?.low ?? []).length === 0 && (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {t("noData")}
+            </p>
+          )}
+        </ChartCard>
+      </div>
+
       {rt === "product" && (
         <>
           <ChartCard title={t("topProducts")}>
@@ -662,99 +757,6 @@ export default function Reports() {
           </Card>
         </>
       )}
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard
-          title={t("paymentMix")}
-          actions={
-            <SegmentedToggle
-              value={mixType}
-              onChange={setMixType}
-              options={[
-                { value: "pie", label: t("chartPie"), icon: PieChart },
-                { value: "bars", label: t("chartBars"), icon: BarChart3 },
-              ]}
-            />
-          }
-        >
-          <div className="space-y-3">
-            {mixType === "pie" ? (
-              <SharePie
-                items={(data?.mix ?? []).map(([m, v]) => ({
-                  name: t(m),
-                  value: v,
-                }))}
-                format={fmt}
-              />
-            ) : (
-              <BarList
-                color={CHART_COLORS.amber}
-                items={(data?.mix ?? []).map(([m, v]) => ({
-                  label: t(m),
-                  value: v,
-                }))}
-                format={fmt}
-              />
-            )}
-            <div className="flex justify-end border-t pt-3">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  csv(
-                    "payment-mix",
-                    ["Method", "Amount"],
-                    (data?.mix ?? []).map(([m, v]) => [m, Math.round(v)]),
-                  )
-                }
-              >
-                <Download className="mr-1 size-3.5" />
-                {t("export")}
-              </Button>
-            </div>
-          </div>
-        </ChartCard>
-        <ChartCard
-          title={t("lowStockReport")}
-          actions={
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() =>
-                csv(
-                  "low-stock",
-                  ["SKU", "Stock", "ReorderAt"],
-                  (data?.low ?? []).map((v) => [
-                    v.sku,
-                    v.stock,
-                    v.reorderLevel,
-                  ]),
-                )
-              }
-            >
-              <Download className="mr-1 size-3.5" />
-              {t("export")}
-            </Button>
-          }
-        >
-          {(data?.low ?? []).map((v) => (
-            <div
-              key={v.id}
-              className="flex justify-between border-b py-1.5 text-sm last:border-0"
-            >
-              <span className="num text-muted-foreground">{v.sku}</span>
-              <span className="num font-medium text-red-600">
-                {v.stock} / {v.reorderLevel}
-              </span>
-            </div>
-          ))}
-          {(data?.low ?? []).length === 0 && (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              {t("noData")}
-            </p>
-          )}
-        </ChartCard>
-      </div>
 
       {holder}
     </div>

@@ -1,7 +1,10 @@
-// POST /api/shop/login — shop-owner login that guards product & settings editing.
-// Credentials come from the server environment (SHOP_ID / SHOP_PASSWORD), so they
-// are never included in the client bundle. Sets a session cookie (no maxAge),
-// which the browser clears when it closes.
+// POST /api/shop/login — shop-owner login that guards product & settings
+// editing. Credentials are PER SHOP now: each record in db.json can carry its
+// own login id + scrypt password hash, set from the owner console (/admin).
+// The build's SHOP_ID decides which record this install belongs to.
+// Offline: falls back to the last cached copy of the registry, so the lock
+// keeps working after restarts as long as the server has seen db.json once.
+import { readRegistryStatic, verifyPassword } from "@/lib/server/registry";
 import { SignJWT } from "jose";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -16,21 +19,26 @@ export async function POST(req: NextRequest) {
   const password = String(body?.password ?? "");
 
   const SID = process.env.SHOP_ID?.trim();
-  const SPW = process.env.SHOP_PASSWORD;
-  if (!SID || !SPW)
+  if (!SID)
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
 
-  const idOk = shopId.trim().toLowerCase() === SID.toLowerCase();
-  const pwOk = password === SPW;
-  if (!idOk || !pwOk)
+  let rec;
+  try {
+    const db = await readRegistryStatic({ allowCache: true });
+    rec = db.shops.find((s) => s.cid === SID.toUpperCase());
+  } catch {
+    return NextResponse.json({ error: "offline" }, { status: 502 });
+  }
+  if (!rec?.admin)
+    return NextResponse.json({ error: "not_configured" }, { status: 503 });
+
+  const idOk = rec.admin.user.toLowerCase() === shopId.trim().toLowerCase();
+  if (!idOk || !verifyPassword(password, rec.admin))
     return NextResponse.json({ error: "wrong" }, { status: 401 });
 
   const secret = process.env.ADMIN_JWT_SECRET;
   if (!secret)
-    return NextResponse.json(
-      { error: "server_misconfigured" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
 
   const token = await new SignJWT({ r: "shop" })
     .setProtectedHeader({ alg: "HS256" })

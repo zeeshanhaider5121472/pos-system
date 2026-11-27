@@ -21,6 +21,8 @@ const ERR: Record<string, string> = {
   REVOKED: "revoked",
   TOO_MANY: "tooMany",
   UNKNOWN_SHOP: "unknownShop",
+  REGISTRY_UNREACHABLE: "registryDown",
+  NEED_VENDOR_SERVER: "needVendorServer",
 };
 
 export default function Activation() {

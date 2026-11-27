@@ -1,5 +1,13 @@
-// src/app/api/admin/customers/route.ts
-import { kvGet, kvSet } from "@/lib/server/kv";
+// src/app/api/admin/customers/route.ts — owner console CRUD.
+// The registry is data/db.json in your GitHub repo. Every Save is a commit +
+// push to main (GitHub Contents API); the connected Vercel static deployment
+// picks it up seconds later. Git history = full audit log of every change.
+import {
+  commitRegistry,
+  readRegistryGithub,
+  sanitizeShop,
+  type RegistryShop,
+} from "@/lib/server/registry";
 import { jwtVerify } from "jose";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -16,58 +24,84 @@ async function auth(req: NextRequest) {
     return false;
   }
 }
-const clean = (s: unknown, max = 200) =>
-  String(s ?? "")
-    .slice(0, max)
-    .trim();
+
+/** never send password hashes or the long code to the browser list */
+const publicView = (s: RegistryShop) => ({
+  ...s,
+  admin: undefined,
+  adminUser: s.admin?.user ?? "",
+  code: undefined,
+});
+
+function mapErr(e: unknown) {
+  const msg = String((e as Error)?.message ?? "");
+  if (msg.includes("GITHUB_NOT_CONFIGURED"))
+    return NextResponse.json({ error: "NOT_CONFIGURED" }, { status: 503 });
+  return NextResponse.json(
+    { error: "REGISTRY_UNREACHABLE", detail: msg.slice(0, 140) },
+    { status: 502 },
+  );
+}
 
 export async function GET(req: NextRequest) {
   if (!(await auth(req)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const idx = (await kvGet<string[]>("cust_index")) ?? [];
-  const list = (await Promise.all(idx.map((c) => kvGet(`cust:${c}`)))).filter(
-    Boolean,
-  );
-  return NextResponse.json({ list });
+  try {
+    const { db } = await readRegistryGithub();
+    return NextResponse.json({ list: db.shops.map(publicView) });
+  } catch (e) {
+    return mapErr(e);
+  }
 }
 
 export async function POST(req: NextRequest) {
   if (!(await auth(req)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const b = await req.json();
-  const cid = clean(b.cid, 24).toUpperCase();
-  if (!/^[A-Z0-9_-]{2,24}$/.test(cid))
-    return NextResponse.json({ error: "BAD_CID" }, { status: 400 });
-  const prev = (await kvGet<any>(`cust:${cid}`)) ?? {};
-  let ds = prev.ds;
-  if (b.ds === null) ds = null;
-  else if (typeof b.ds === "string" && b.ds) ds = b.ds;
-  const rec = {
-    cid,
-    status: b.status === "revoked" ? "revoked" : "active",
-    plan: ["monthly", "quarterly", "yearly"].includes(b.plan)
-      ? b.plan
-      : "monthly",
-    expiry: /^\d{4}-\d{2}-\d{2}$/.test(b.expiry ?? "")
-      ? b.expiry
-      : "1970-01-01",
-    ds,
-    fp: prev.fp ?? "",
-    features: Object.fromEntries(
-      Object.entries(b.features ?? {}).map(([k, v]) => [k, v === true]),
-    ),
-    branding: {
-      // keep fields no longer edited in the admin UI (address, phone,
-      // currency, tax, footers, logo) — the shop overrides them locally in
-      // Settings → Shop Details anyway, and old data must not be lost
-      ...(prev.branding ?? {}),
-      shopName: clean(b.branding?.shopName, 60),
-      shopNameUr: clean(b.branding?.shopNameUr, 60),
-    },
-    updatedAt: Date.now(),
-  };
-  await kvSet(`cust:${cid}`, rec);
-  const idx = (await kvGet<string[]>("cust_index")) ?? [];
-  if (!idx.includes(cid)) await kvSet("cust_index", [...idx, cid]);
-  return NextResponse.json({ ok: true });
+  try {
+    const b = await req.json();
+    const cid = String(b.cid ?? "")
+      .trim()
+      .toUpperCase();
+    if (!/^[A-Z0-9_-]{2,24}$/.test(cid))
+      return NextResponse.json({ error: "BAD_CID" }, { status: 400 });
+    const { db } = await readRegistryGithub();
+    const rec = sanitizeShop(
+      b,
+      db.shops.find((s) => s.cid === cid),
+    );
+    const i = db.shops.findIndex((s) => s.cid === cid);
+    if (i >= 0) db.shops[i] = rec;
+    else db.shops.push(rec);
+    db.updatedAt = Date.now();
+    const c = await commitRegistry(db, `admin: ${cid} saved`);
+    return NextResponse.json({
+      ok: true,
+      commit: { sha: c.sha.slice(0, 7), url: c.url },
+    });
+  } catch (e) {
+    return mapErr(e);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!(await auth(req)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  try {
+    const cid = (req.nextUrl.searchParams.get("cid") ?? "")
+      .trim()
+      .toUpperCase();
+    if (!cid) return NextResponse.json({ error: "BAD_CID" }, { status: 400 });
+    const { db } = await readRegistryGithub();
+    if (!db.shops.some((s) => s.cid === cid))
+      return NextResponse.json({ error: "UNKNOWN_SHOP" }, { status: 404 });
+    db.shops = db.shops.filter((s) => s.cid !== cid);
+    db.updatedAt = Date.now();
+    const c = await commitRegistry(db, `admin: ${cid} deleted`);
+    return NextResponse.json({
+      ok: true,
+      commit: { sha: c.sha.slice(0, 7), url: c.url },
+    });
+  } catch (e) {
+    return mapErr(e);
+  }
 }

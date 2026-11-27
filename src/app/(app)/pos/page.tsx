@@ -341,7 +341,7 @@ export default function POS() {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
       <div>
-        <div className="relative mb-3">
+        <div className="relative ml-3 mr-5.5 mb-3">
           <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
           <Input
             value={q}
@@ -350,39 +350,41 @@ export default function POS() {
             className="pl-9"
           />
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-          {shown.map((v) => (
-            <Card
-              key={v.id}
-              className="cursor-pointer transition-colors hover:border-foreground/40"
-              onClick={() => add(v)}
-            >
-              <CardContent className="p-3">
-                <p className="truncate text-[13px] font-medium">{v.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {v.size} · {v.color}
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="num text-sm font-semibold text-emerald-600">
-                    {v.price.toLocaleString()}
-                  </span>
-                  <Badge
-                    variant={
-                      v.stock <= v.reorderLevel ? "destructive" : "secondary"
-                    }
-                    className="num"
-                  >
-                    {v.stock}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="h-dvh space-y-2 overflow-y-auto p-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            {shown.map((v) => (
+              <Card
+                key={v.id}
+                className="cursor-pointer transition-colors hover:border-foreground/40"
+                onClick={() => add(v)}
+              >
+                <CardContent className="p-3">
+                  <p className="truncate text-[13px] font-medium">{v.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {v.size} · {v.color}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="num text-sm font-semibold text-emerald-600">
+                      {v.price.toLocaleString()}
+                    </span>
+                    <Badge
+                      variant={
+                        v.stock <= v.reorderLevel ? "destructive" : "secondary"
+                      }
+                      className="num"
+                    >
+                      {v.stock}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="flex flex-col rounded-lg border">
-        <div className="min-h-45 flex-1 space-y-2 overflow-y-auto p-3">
+        <div className="max-h-76 flex-1 space-y-2 overflow-y-auto p-3">
           {cart.length === 0 && (
             <p className="py-10 text-center text-sm text-muted-foreground">
               {t("emptyCart")}
